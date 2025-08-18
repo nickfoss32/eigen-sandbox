@@ -1,10 +1,13 @@
+#include <transforms/lla_to_ecef.hpp>
 #include <propagator/propagator.hpp>
 #include <integrator/rk4.hpp>
 #include <dynamics/gravity.hpp>
 #include <dynamics/ballistic3d.hpp>
-#include "lla_to_ecef.hpp"
+#include <noise/gaussian_noise.hpp>
+
 #include <Eigen/Dense>
 #include <nlohmann/json.hpp>
+
 #include <fstream>
 #include <iostream>
 #include <iomanip>
@@ -19,6 +22,11 @@ int main() {
     double dt = 0.1; // Time step (s)
     double tf = 1000.0; // Propagate for 20 seconds (adjust as needed)
     auto earth_gravity = std::make_shared<J2Gravity>();
+
+    // Noise parameters
+    double sigma_pos = 5000.0; // Standard deviation for position noise (meters)
+    double sigma_vel = 100.0;  // Standard deviation for velocity noise (m/s)
+    GaussianNoise noise_generator(sigma_pos, sigma_vel); // Initialize noise generator
 
     // Reference launch point (Cape Canaveral)
     double ref_lat = 28.3922; // Latitude (degrees)
@@ -59,18 +67,31 @@ int main() {
 
     // JSON array to store trajectory data
     nlohmann::json traj_json = nlohmann::json::array();
-
-    for (const auto& entry : trajectory) {
+    double prevTrackAltitude = 0.0;
+    int trackFallingCount = 0;
+    for (auto& entry : trajectory) {
         double t = entry.first;
-        const auto& state = entry.second;
+        auto& state = entry.second;
 
-        std::cout << "time: " << std::fixed << std::setprecision(4) << t << ", state: " << std::endl << state.transpose() << std::endl;
+        std::cout << "time: " << std::fixed << std::setprecision(4) << t << ", state (pre-noise): " << std::endl << state.transpose() << std::endl;
 
-        // Stop if at impact
-        if (t != 0.0 && state.norm() <= earth_radius) {
-            std::cout << "impact reached!" << std::endl;
+        // Stop a little after track stops climbing to simulate sensors losing sight of the track due to being post-burnout
+        trackFallingCount += ((state.norm() < prevTrackAltitude) ? 1 : 0);
+        if (trackFallingCount > 5) {
+            std::cout << "Track falling after 5 consecutive points. Stopping simulation." << std::endl;
             break;
         }
+        else if (state.head(3).norm() <= earth_radius)
+        {
+            std::cout << "Impact reached. Stopping simulation." << std::endl;
+            break;
+        }
+        prevTrackAltitude = state.norm();
+
+        // Add Gaussian noise to the state before writing to file
+        state += noise_generator.generate_noise();
+
+        std::cout << "time: " << std::fixed << std::setprecision(4) << t << ", state (post-noise): " << std::endl << state.transpose() << std::endl;
 
         // Create JSON object for current state
         nlohmann::json point;
@@ -80,14 +101,14 @@ int main() {
     }
 
     // Write JSON to file
-    std::ofstream outFile("trajectory_3d.json");
+    std::ofstream outFile("track_data.json");
     if (!outFile.is_open()) {
         std::cerr << "Error opening output file!" << std::endl;
         return 1;
     }
     outFile << traj_json.dump(4); // Pretty-print with 4-space indentation
     outFile.close();
-    std::cout << "3D trajectory data written to trajectory_3d.json" << std::endl;
+    std::cout << "3D trajectory data written to track_data.json" << std::endl;
 
     return 0;
 }

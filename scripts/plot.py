@@ -28,10 +28,9 @@ trajectory_trace = go.Scatter3d(
     x=x,
     y=y,
     z=z,
-    mode="lines+markers",
+    mode="markers",
     name="Trajectory",
-    line=dict(color="red", width=4),
-    marker=dict(size=3),
+    marker=dict(color="red", size=2),
     hovertemplate="Time: %{text:.2f}s<br>X: %{x:.2f}<br>Y: %{y:.2f}<br>Z: %{z:.2f}",
     text=times
 )
