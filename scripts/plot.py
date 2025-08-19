@@ -1,4 +1,5 @@
 import json
+import os
 import numpy as np
 import plotly.graph_objects as go
 import argparse
@@ -246,10 +247,11 @@ if plane_trace:
 data_traces += full_country_traces + zoomed_country_traces
 fig = go.Figure(data=data_traces)
 
-# Update layout without custom camera settings
+# Update the plot layout
+filename = os.path.basename(args.trajectory_file)
 fig.update_layout(
     title=dict(
-        text="3D Ballistic Missile Trajectory with Toggleable Globe Views",
+        text=f"ECEF Track Trajectory from: {filename}",
         x=0.5,
         xanchor="center",
         y=0.95,

@@ -13,9 +13,9 @@ find_package(Eigen3 REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(Boost CONFIG REQUIRED COMPONENTS program_options)
 
-add_executable(predict-impact apps/predict_impact.cpp)
-target_include_directories(predict-impact PRIVATE include)
-target_link_libraries(predict-impact
+add_executable(propagate-track apps/propagate_track.cpp)
+target_include_directories(propagate-track PRIVATE include)
+target_link_libraries(propagate-track
     PRIVATE
         Eigen3::Eigen
         nlohmann_json::nlohmann_json
@@ -28,4 +28,5 @@ target_link_libraries(generate-data
     PRIVATE
         Eigen3::Eigen
         nlohmann_json::nlohmann_json
+        Boost::program_options
 )

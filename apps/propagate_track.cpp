@@ -1,8 +1,10 @@
+
 #include <propagator/propagator.hpp>
 #include <integrator/rk4.hpp>
 #include <dynamics/gravity.hpp>
 #include <dynamics/ballistic3d.hpp>
 #include <fitting/plane_fit.hpp>
+#include <fitting/factory.hpp>
 
 #include <Eigen/Dense>
 #include <nlohmann/json.hpp>
@@ -15,53 +17,43 @@
 #include <cmath>
 #include <memory>
 
-using json = nlohmann::json;
-
 namespace po = boost::program_options;
 
 int main(int argc, char* argv[]) {
-    // Simulation parameters
-    double earth_radius = 6371000; // (m)
-    double dt = 0.1; // Time step (s)
-    double tf = 1000.0; // Propagate for 1000 seconds (adjust as needed)
-    auto earth_gravity = std::make_shared<J2Gravity>();
-
     // Command-line options
     po::options_description desc("Allowed options");
     desc.add_options()
         ("help,h", "Produce help message")
-        ("input,i", po::value<std::string>(), "Input JSON file with pre-recorded trajectory points");
+        ("input,i", po::value<std::string>()->required(), "Input JSON file with pre-recorded trajectory points")
+        ("output,o", po::value<std::string>()->default_value("predicted_trajectory.json"), "Output JSON file with predicted trajectory points")
+        ("plane-fit-mode,m", po::value<PlaneFitMode>()->default_value(PlaneFitMode::OLS), "Type of plane fit to use for predicting trajectory (OLS or TLS)")
+        ("timestep,t", po::value<double>()->default_value(0.1), "Timestep size to use for propagator (seconds)");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
-    po::notify(vm);
 
     if (vm.count("help")) {
         std::cout << desc << std::endl;
         return 0;
     }
+    po::notify(vm);
 
-    // Check for input file
-    std::string input_file;
-    if (vm.count("input")) {
-        input_file = vm["input"].as<std::string>();
-    } else {
-        std::cerr << "Error: Input JSON file must be specified using --input or -i" << std::endl;
-        std::cout << desc << std::endl;
-        return 1;
-    }
+    // Simulation parameters
+    constexpr double earth_radius = 6371000; // (m)
+    double dt = vm["timestep"].as<double>(); // Time step (s)
 
     // Read input JSON file
+    auto input_file = vm["input"].as<std::string>();
     std::ifstream inFile(input_file);
     if (!inFile.is_open()) {
         std::cerr << "Error: Could not open input file " << input_file << std::endl;
         return 1;
     }
 
-    json input_json;
+    nlohmann::json input_json;
     try {
         inFile >> input_json;
-    } catch (const json::exception& e) {
+    } catch (const nlohmann::json::exception& e) {
         std::cerr << "Error: Failed to parse JSON file " << input_file << ": " << e.what() << std::endl;
         inFile.close();
         return 1;
@@ -94,9 +86,9 @@ int main(int argc, char* argv[]) {
 
     // calculate best fit plane amongst points (fit through origin)
     std::optional<std::pair<Eigen::Vector3d, Eigen::Vector3d>> plane = std::nullopt;
-    // auto planeFitter = std::make_unique<RegressionPlaneFitter>();
-    auto planeFitter = std::make_unique<TotalLeastSquaresPlaneFitter>();
+    PlaneFitMode mode = vm["plane-fit-mode"].as<PlaneFitMode>();
     std::vector<Eigen::Vector3d> positions;
+    std::unique_ptr<PlaneFitter> planeFitter = nullptr;
     positions.reserve(input_points.size()); // Pre-allocate for efficiency
     std::transform(
         input_points.begin(), input_points.end(), std::back_inserter(positions),
@@ -105,11 +97,9 @@ int main(int argc, char* argv[]) {
         }
     );
     try {
+        planeFitter = PlaneFitterFactory::create(mode);
         plane = planeFitter->computeFit(positions);
     }
-    // catch(const std::invalid_argument& e) {
-    //     std::cout << "Unable to calculate plane fit! Invalid argument exception thrown: " << e.what() << std::endl;
-    // }
     catch(const std::exception& e) {
         std::cout << "Unable to calculate plane fit! Exception thrown: " << e.what() << std::endl;
     }
@@ -130,9 +120,10 @@ int main(int argc, char* argv[]) {
         initial_state = planeFitter->projectState(initial_state, normal, point);
     }
 
-    std::cout << "initial state: " << std::fixed << std::setprecision(4) << std::endl << initial_state.transpose() << std::endl;
+    // std::cout << "initial state: " << std::fixed << std::setprecision(4) << std::endl << initial_state.transpose() << std::endl;
 
     // create a propagator to model this trajectory
+    auto earth_gravity = std::make_shared<J2Gravity>();
     auto dynamics = std::make_shared<Ballistic3D>(earth_gravity);
     auto integrator = std::make_shared<RK4Integrator>();
     Propagator propagator(dynamics, integrator, dt);
@@ -141,11 +132,11 @@ int main(int argc, char* argv[]) {
     auto trajectory = propagator.propagate_to_impact(initial_time, initial_state);
 
     // JSON array to store trajectory data (input + propagated points)
-    json traj_json = json::array();
+    nlohmann::json traj_json = nlohmann::json::array();
 
     // Add input points to JSON
     for (const auto& point : input_points) {
-        json json_point;
+        nlohmann::json json_point;
         json_point["time"] = point.first;
         json_point["state"] = {point.second(0), point.second(1), point.second(2),
                                point.second(3), point.second(4), point.second(5)};
@@ -157,10 +148,10 @@ int main(int argc, char* argv[]) {
         double t = entry.first;
         const auto& state = entry.second;
 
-        std::cout << "time: " << std::fixed << std::setprecision(4) << t << ", state: " << std::endl << state.transpose() << std::endl;
+        // std::cout << "time: " << std::fixed << std::setprecision(4) << t << ", state: " << std::endl << state.transpose() << std::endl;
 
         // Create JSON object for current state
-        json point;
+        nlohmann::json point;
         point["time"] = t;
         point["state"] = {state(0), state(1), state(2), state(3), state(4), state(5)};
         traj_json.push_back(point);
@@ -168,14 +159,16 @@ int main(int argc, char* argv[]) {
 
     // Sort JSON array by time
     std::sort(traj_json.begin(), traj_json.end(),
-        [](const json& a, const json& b) {
+        [](const nlohmann::json& a, const nlohmann::json& b) {
             return a["time"].get<double>() < b["time"].get<double>();
         });
 
-    json data_json = {};
+    nlohmann::json data_json = {};
     data_json["points"] = traj_json;
+    data_json["summary"] = input_json["summary"];
     if (plane.has_value()) {
         const auto& [normal, point] = plane.value(); // Structured binding for clarity
+        data_json["summary"]["fit"]["type"] = (mode == PlaneFitMode::OLS ? "OLS" : "TLS");
         data_json["summary"]["fit"]["normal"] = {normal[0], normal[1], normal[2]};
         data_json["summary"]["fit"]["point"] = {point[0], point[1], point[2]};
     }
@@ -185,14 +178,15 @@ int main(int argc, char* argv[]) {
     }
 
     // Write JSON to file
-    std::ofstream outFile("predicted_track.json");
+    auto output_file = vm["output"].as<std::string>();
+    std::ofstream outFile(output_file);
     if (!outFile.is_open()) {
         std::cerr << "Error opening output file!" << std::endl;
         return 1;
     }
     outFile << data_json.dump(4); // Pretty-print with 4-space indentation
     outFile.close();
-    std::cout << "3D trajectory data written to predicted_track.json" << std::endl;
+    std::cout << "Predicted 3D trajectory data written to " << output_file << std::endl;
 
     return 0;
 }
