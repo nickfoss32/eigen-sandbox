@@ -151,19 +151,83 @@ for _, row in gdf.iterrows():
                 )
             )
 
+# Extract best fit plane parameters if available
+normal_list = data["summary"]["fit"]["normal"]
+point_list = data["summary"]["fit"]["point"]
+plane_trace = None
+if normal_list and point_list:
+    normal = np.array(normal_list)
+    point = np.array(point_list)
+    normal = normal / np.linalg.norm(normal)  # Unit normal
+
+    # Function to get a perpendicular vector
+    def perpendicular_vector(n):
+        if n[0] == 0 and n[1] == 0:
+            if n[2] == 0:
+                raise ValueError("Zero normal vector")
+            return np.array([1, 0, 0])
+        return np.array([-n[1], n[0], 0])
+
+    # Basis vectors for the plane
+    v_temp = perpendicular_vector(normal)
+    v1 = v_temp / np.linalg.norm(v_temp)
+    v2 = np.cross(normal, v1)
+
+    # Trajectory points
+    traj_points = np.column_stack((x, y, z))
+
+    # Project trajectory points onto the plane
+    dists = np.dot(traj_points - point, normal)
+    projs = traj_points - np.outer(dists, normal)
+
+    # Compute u, v coordinates on the plane
+    us = np.dot(projs - point, v1)
+    vs = np.dot(projs - point, v2)
+
+    u_min, u_max = np.min(us), np.max(us)
+    v_min, v_max = np.min(vs), np.max(vs)
+    margin = 0.1 * max(u_max - u_min, v_max - v_min)
+    if margin == 0:
+        margin = 1e5  # Default margin if trajectory is degenerate
+
+    # Grid for the plane surface
+    u_grid = np.linspace(u_min - margin, u_max + margin, 30)
+    v_grid = np.linspace(v_min - margin, v_max + margin, 30)
+    uu, vv = np.meshgrid(u_grid, v_grid)
+
+    plane_x = point[0] + uu * v1[0] + vv * v2[0]
+    plane_y = point[1] + uu * v1[1] + vv * v2[1]
+    plane_z = point[2] + uu * v1[2] + vv * v2[2]
+
+    # Best fit plane trace (always visible in both views)
+    plane_trace = go.Surface(
+        x=plane_x,
+        y=plane_y,
+        z=plane_z,
+        colorscale=[[0, 'rgb(0,255,0)'], [1, 'rgb(0,255,0)']],
+        opacity=0.3,
+        name="Best Fit Plane",
+        showscale=False,
+        hoverinfo="skip",
+        visible=True
+    )
+
 # Define update menus for toggling views
+has_plane = plane_trace is not None
+full_visible = [True, False, True] + ([True] if has_plane else []) + [True] * len(full_country_traces) + [False] * len(zoomed_country_traces)
+zoom_visible = [False, True, True] + ([True] if has_plane else []) + [False] * len(full_country_traces) + [True] * len(zoomed_country_traces)
 updatemenus = [
     dict(
         buttons=[
             dict(
                 label="Full Globe",
                 method="update",
-                args=[{"visible": [True, False, True] + [True] * len(full_country_traces) + [False] * len(zoomed_country_traces)}]
+                args=[{"visible": full_visible}]
             ),
             dict(
                 label="Zoomed Subsection",
                 method="update",
-                args=[{"visible": [False, True, True] + [False] * len(full_country_traces) + [True] * len(zoomed_country_traces)}]
+                args=[{"visible": zoom_visible}]
             )
         ],
         direction="up",
@@ -176,7 +240,11 @@ updatemenus = [
 ]
 
 # Create figure
-fig = go.Figure(data=[globe_trace_full, globe_trace_zoomed, trajectory_trace] + full_country_traces + zoomed_country_traces)
+data_traces = [globe_trace_full, globe_trace_zoomed, trajectory_trace]
+if plane_trace:
+    data_traces.append(plane_trace)
+data_traces += full_country_traces + zoomed_country_traces
+fig = go.Figure(data=data_traces)
 
 # Update layout without custom camera settings
 fig.update_layout(

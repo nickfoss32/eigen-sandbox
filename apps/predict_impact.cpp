@@ -94,7 +94,8 @@ int main(int argc, char* argv[]) {
 
     // calculate best fit plane amongst points (fit through origin)
     std::optional<std::pair<Eigen::Vector3d, Eigen::Vector3d>> plane = std::nullopt;
-    auto planeFitter = std::make_unique<RegressionPlaneFitter>();
+    // auto planeFitter = std::make_unique<RegressionPlaneFitter>();
+    auto planeFitter = std::make_unique<TotalLeastSquaresPlaneFitter>();
     std::vector<Eigen::Vector3d> positions;
     positions.reserve(input_points.size()); // Pre-allocate for efficiency
     std::transform(
