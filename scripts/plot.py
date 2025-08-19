@@ -18,10 +18,10 @@ except FileNotFoundError:
     exit(1)
 
 # Extract time and state vectors
-times = [point["time"] for point in data]
-x = np.array([point["state"][0] for point in data])
-y = np.array([point["state"][1] for point in data])
-z = np.array([point["state"][2] for point in data])
+times = [point["time"] for point in data["points"]]
+x = np.array([point["state"][0] for point in data["points"]])
+y = np.array([point["state"][1] for point in data["points"]])
+z = np.array([point["state"][2] for point in data["points"]])
 
 # Create 3D trajectory trace
 trajectory_trace = go.Scatter3d(
@@ -95,6 +95,8 @@ for _, row in gdf.iterrows():
                 showlegend=False
             )
         )
+
+# Plot best fit plane info
 
 # Create figure
 fig = go.Figure(data=[globe_trace, trajectory_trace] + country_traces)

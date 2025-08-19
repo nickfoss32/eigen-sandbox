@@ -1,17 +1,21 @@
-#include <transforms/lla_to_ecef.hpp>
 #include <propagator/propagator.hpp>
 #include <integrator/rk4.hpp>
 #include <dynamics/gravity.hpp>
 #include <dynamics/ballistic3d.hpp>
+#include <fitting/plane_fit.hpp>
 
 #include <Eigen/Dense>
 #include <nlohmann/json.hpp>
 #include <boost/program_options.hpp>
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
 #include <cmath>
+#include <memory>
+
+using json = nlohmann::json;
 
 namespace po = boost::program_options;
 
@@ -54,10 +58,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    nlohmann::json input_json;
+    json input_json;
     try {
         inFile >> input_json;
-    } catch (const nlohmann::json::exception& e) {
+    } catch (const json::exception& e) {
         std::cerr << "Error: Failed to parse JSON file " << input_file << ": " << e.what() << std::endl;
         inFile.close();
         return 1;
@@ -65,13 +69,13 @@ int main(int argc, char* argv[]) {
     inFile.close();
 
     // Validate JSON structure and extract points
-    if (!input_json.is_array() || input_json.empty()) {
+    if (!input_json["points"].is_array() || input_json["points"].empty()) {
         std::cerr << "Error: Input JSON must be a non-empty array of points" << std::endl;
         return 1;
     }
 
     std::vector<std::pair<double, Eigen::VectorXd>> input_points;
-    for (const auto& point : input_json) {
+    for (const auto& point : input_json["points"]) {
         if (!point.contains("time") || !point.contains("state") || !point["state"].is_array() || point["state"].size() != 6) {
             std::cerr << "Error: Invalid point structure in JSON. Each point must have 'time' and 'state' with 6 values" << std::endl;
             return 1;
@@ -88,6 +92,27 @@ int main(int argc, char* argv[]) {
         input_points.emplace_back(t, state);
     }
 
+    // calculate best fit plane amongst points (fit through origin)
+    std::optional<std::pair<Eigen::Vector3d, Eigen::Vector3d>> plane = std::nullopt;
+    auto planeFitter = std::make_unique<RegressionPlaneFitter>();
+    std::vector<Eigen::Vector3d> positions;
+    positions.reserve(input_points.size()); // Pre-allocate for efficiency
+    std::transform(
+        input_points.begin(), input_points.end(), std::back_inserter(positions),
+        [](const auto& pair) {
+            return pair.second.head(3);
+        }
+    );
+    try {
+        plane = planeFitter->computeFit(positions);
+    }
+    // catch(const std::invalid_argument& e) {
+    //     std::cout << "Unable to calculate plane fit! Invalid argument exception thrown: " << e.what() << std::endl;
+    // }
+    catch(const std::exception& e) {
+        std::cout << "Unable to calculate plane fit! Exception thrown: " << e.what() << std::endl;
+    }
+
     // Find the point with the latest time
     auto latest_point = std::max_element(input_points.begin(), input_points.end(),
         [](const auto& a, const auto& b) { return a.first < b.first; });
@@ -95,11 +120,16 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: No valid points found in input JSON" << std::endl;
         return 1;
     }
-
+    
+    // project last point onto best fit plane
     double initial_time = latest_point->first;
-    Eigen::VectorXd initial_state = latest_point->second;
-    std::cout << "Using latest state at time " << std::fixed << std::setprecision(4) << initial_time
-              << ": " << initial_state.transpose() << std::endl;
+    auto initial_state = latest_point->second;
+    if (plane.has_value()) {
+        const auto& [normal, point] = plane.value(); // Structured binding for clarity
+        initial_state = planeFitter->projectState(initial_state, normal, point);
+    }
+
+    std::cout << "initial state: " << std::fixed << std::setprecision(4) << std::endl << initial_state.transpose() << std::endl;
 
     // create a propagator to model this trajectory
     auto dynamics = std::make_shared<Ballistic3D>(earth_gravity);
@@ -110,14 +140,14 @@ int main(int argc, char* argv[]) {
     auto trajectory = propagator.propagate_to_impact(initial_time, initial_state);
 
     // JSON array to store trajectory data (input + propagated points)
-    nlohmann::json traj_json = nlohmann::json::array();
+    json traj_json = json::array();
 
     // Add input points to JSON
     for (const auto& point : input_points) {
-        nlohmann::json json_point;
+        json json_point;
         json_point["time"] = point.first;
         json_point["state"] = {point.second(0), point.second(1), point.second(2),
-                              point.second(3), point.second(4), point.second(5)};
+                               point.second(3), point.second(4), point.second(5)};
         traj_json.push_back(json_point);
     }
 
@@ -129,7 +159,7 @@ int main(int argc, char* argv[]) {
         std::cout << "time: " << std::fixed << std::setprecision(4) << t << ", state: " << std::endl << state.transpose() << std::endl;
 
         // Create JSON object for current state
-        nlohmann::json point;
+        json point;
         point["time"] = t;
         point["state"] = {state(0), state(1), state(2), state(3), state(4), state(5)};
         traj_json.push_back(point);
@@ -137,9 +167,21 @@ int main(int argc, char* argv[]) {
 
     // Sort JSON array by time
     std::sort(traj_json.begin(), traj_json.end(),
-        [](const nlohmann::json& a, const nlohmann::json& b) {
+        [](const json& a, const json& b) {
             return a["time"].get<double>() < b["time"].get<double>();
         });
+
+    json data_json = {};
+    data_json["points"] = traj_json;
+    if (plane.has_value()) {
+        const auto& [normal, point] = plane.value(); // Structured binding for clarity
+        data_json["summary"]["fit"]["normal"] = {normal[0], normal[1], normal[2]};
+        data_json["summary"]["fit"]["point"] = {point[0], point[1], point[2]};
+    }
+    else {
+        data_json["summary"]["fit"]["normal"] = {};
+        data_json["summary"]["fit"]["point"] = {};
+    }
 
     // Write JSON to file
     std::ofstream outFile("predicted_track.json");
@@ -147,7 +189,7 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error opening output file!" << std::endl;
         return 1;
     }
-    outFile << traj_json.dump(4); // Pretty-print with 4-space indentation
+    outFile << data_json.dump(4); // Pretty-print with 4-space indentation
     outFile.close();
     std::cout << "3D trajectory data written to predicted_track.json" << std::endl;
 

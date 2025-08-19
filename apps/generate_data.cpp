@@ -12,9 +12,13 @@
 #include <iostream>
 #include <iomanip>
 #include <cmath>
+#include <memory>
+
+using json = nlohmann::json;
 
 int main() {
     // Simulation parameters
+    /// @todo maybe add program args and separate constants from configurable params to make this more flexible to use
     double earth_radius = 6371000; // (m)
     double v0 = 3000.0; // Initial speed (m/s)
     double theta = 75* (M_PI/180); // Elevation angle (radians)
@@ -66,7 +70,7 @@ int main() {
     auto trajectory = propagator.propagate(0.0, initial_state, tf);
 
     // JSON array to store trajectory data
-    nlohmann::json traj_json = nlohmann::json::array();
+    json traj_json = json::array();
     double prevTrackAltitude = 0.0;
     int trackFallingCount = 0;
     for (auto& entry : trajectory) {
@@ -100,13 +104,17 @@ int main() {
         traj_json.push_back(point);
     }
 
+    json data_json = {};
+    data_json["points"] = traj_json;
+    data_json["summary"] = {};
+
     // Write JSON to file
     std::ofstream outFile("track_data.json");
     if (!outFile.is_open()) {
         std::cerr << "Error opening output file!" << std::endl;
         return 1;
     }
-    outFile << traj_json.dump(4); // Pretty-print with 4-space indentation
+    outFile << data_json.dump(4); // Pretty-print with 4-space indentation
     outFile.close();
     std::cout << "3D trajectory data written to track_data.json" << std::endl;
 
