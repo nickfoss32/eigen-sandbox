@@ -153,10 +153,11 @@ for _, row in gdf.iterrows():
             )
 
 # Extract best fit plane parameters if available
-normal_list = data["summary"]["fit"]["normal"]
-point_list = data["summary"]["fit"]["point"]
+has_fit = "fit" in data["summary"]
 plane_trace = None
-if normal_list and point_list:
+if has_fit:
+    normal_list = data["summary"]["fit"]["normal"]
+    point_list = data["summary"]["fit"]["point"]
     normal = np.array(normal_list)
     point = np.array(point_list)
     normal = normal / np.linalg.norm(normal)  # Unit normal
@@ -240,6 +241,26 @@ updatemenus = [
     )
 ]
 
+# Extract and format summary metadata
+summary = data.get("summary", {})
+simulation = summary.get("simulation", {})
+launch = simulation.get("launch", {})
+noise = simulation.get("noise", {})
+
+# Format metadata as a string
+metadata_text = (
+    "<b>Simulation Metadata</b><br>"
+    f"Launch Altitude: {launch.get('altitude', 'N/A')} m<br>"
+    f"Launch Azimuth: {launch.get('azimuth', 'N/A')}°<br>"
+    f"Launch Elevation: {launch.get('elevation', 'N/A')}°<br>"
+    f"Launch Latitude: {launch.get('latitude', 'N/A')}°<br>"
+    f"Launch Longitude: {launch.get('longitude', 'N/A')}°<br>"
+    f"Launch Velocity: {launch.get('velocity', 'N/A')} m/s<br>"
+    f"Noise Sigma Pos: {noise.get('sigma_pos', 'N/A')} m<br>"
+    f"Noise Sigma Vel: {noise.get('sigma_vel', 'N/A')} m/s<br>"
+    f"Timestep: {simulation.get('timestep', 'N/A')} s"
+)
+
 # Create figure
 data_traces = [globe_trace_full, globe_trace_zoomed, trajectory_trace]
 if plane_trace:
@@ -267,7 +288,22 @@ fig.update_layout(
         zaxis=dict(showgrid=False)
     ),
     updatemenus=updatemenus,
-    showlegend=True
+    showlegend=True,
+    annotations=[
+        dict(
+            text=metadata_text,
+            x=0.05,  # Position in the left corner
+            y=0.95,  # Position near the top
+            xref="paper",
+            yref="paper",
+            showarrow=False,
+            align="left",
+            bgcolor="rgba(255, 255, 255, 0.8)",  # Semi-transparent white background
+            bordercolor="black",
+            borderwidth=1,
+            font=dict(size=12)
+        )
+    ]
 )
 
 # Show plot

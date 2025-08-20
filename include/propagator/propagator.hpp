@@ -2,6 +2,7 @@
 
 #include <dynamics/ballistic3d.hpp>
 #include <integrator/rk4.hpp>
+#include <transforms/lla_to_ecef.hpp>
 #include <vector>
 #include <memory>
 
@@ -46,13 +47,12 @@ public:
     /// @return propagated states
     std::vector<std::pair<double, Eigen::VectorXd>> propagate_to_impact(double t0, const Eigen::VectorXd& initial_state) const
     {
-        double earth_radius = 6371000; // (m)
         std::vector<std::pair<double, Eigen::VectorXd>> trajectory;
         double t = t0;
         Eigen::VectorXd state = initial_state;
         trajectory.emplace_back(t, state);
 
-        while (state.head(3).norm() > earth_radius) {
+        while (ecef_to_lla(state.head(3))[2] > 0.0) {
             double step_dt = timestep_;
             state = integrator_->step(t, state, step_dt, *dynamics_);
             t += step_dt;

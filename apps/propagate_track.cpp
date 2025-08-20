@@ -39,7 +39,6 @@ int main(int argc, char* argv[]) {
     po::notify(vm);
 
     // Simulation parameters
-    constexpr double earth_radius = 6371000; // (m)
     double dt = vm["timestep"].as<double>(); // Time step (s)
 
     // Read input JSON file

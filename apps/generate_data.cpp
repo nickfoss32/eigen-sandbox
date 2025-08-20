@@ -44,7 +44,6 @@ int main(int argc, char* argv[]) {
     po::notify(vm);
 
     // Simulation parameters
-    constexpr double earth_radius = 6371000; // (m)
     double tf = vm["propagation-time"].as<double>(); // Propagate for 20 seconds (adjust as needed)
     double dt = vm["timestep"].as<double>(); // Time step (s)
     double ref_lat = vm["latitude"].as<double>(); // Latitude (degrees)
@@ -106,7 +105,7 @@ int main(int argc, char* argv[]) {
             // std::cout << "Track falling after 5 consecutive points. Stopping simulation." << std::endl;
             break;
         }
-        else if (state.head(3).norm() <= earth_radius)
+        else if (t != 0.0 && ecef_to_lla(state.head(3))[2] <= 0.0)
         {
             // std::cout << "Impact reached. Stopping simulation." << std::endl;
             break;
