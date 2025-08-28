@@ -8,6 +8,12 @@
 /// @brief Common base class for all plane fitters
 class PlaneFitter {
 public:
+    /// @brief Constructor
+    /// @param fitThroughOrigin Whether or not the calculated plane fit should go through the origin
+    PlaneFitter(bool fitThroughOrigin = true)
+     : fitThroughOrigin_(fitThroughOrigin)
+    {}
+
     /// @brief Virtual destructor for proper cleanup
     virtual ~PlaneFitter() = default;
 
@@ -54,6 +60,10 @@ public:
         return state_proj;
     }
 
+protected:
+    /// @brief Boolean indicating whether fit should go through the origin (0,0,0)
+    bool fitThroughOrigin_{true};
+
 private:
     /// @brief Virtual interface for computing a best fit plane
     /// @param points The set of positions to calculate a best-fit plane for.
@@ -66,6 +76,13 @@ private:
 /// @note This may not perform well for planes nearly parallel to the z-axis.
 class RegressionPlaneFitter : public PlaneFitter
 {
+public:
+    /// @brief Constructor
+    /// @param fitThroughOrigin Whether or not the calculated plane fit should go through the origin
+    RegressionPlaneFitter(bool fitThroughOrigin = true)
+     : PlaneFitter(fitThroughOrigin)
+    {}
+
 private:
     /// @brief Calculates the best-fit plane for a given set of points.
     /// @return the plane normal and a point on the plane.
@@ -92,6 +109,9 @@ private:
         double a = theta[0];
         double b = theta[1];
         double c = theta[2];
+        if (!PlaneFitter::fitThroughOrigin_) {
+            c = 0.0;
+        }
 
         // Form normal vector for plane a*x + b*y - z + c = 0
         Eigen::Vector3d normal(a, b, -1.0);
@@ -104,6 +124,9 @@ private:
         // Compute a point on the plane: use average x,y with fitted z
         double z_fit = a * avg.x() + b * avg.y() + c;
         Eigen::Vector3d point_on_plane(avg.x(), avg.y(), z_fit);
+        if (PlaneFitter::fitThroughOrigin_) {
+            point_on_plane = Eigen::Vector3d::Zero();
+        }
 
         return {normal, point_on_plane};
     }
@@ -112,6 +135,13 @@ private:
 /// @brief Plane fitter using total least squares (TLS, orthogonal regression), minimizing perpendicular distances.
 /// Uses SVD on centered points to find the plane normal as the direction of least variance.
 class TotalLeastSquaresPlaneFitter : public PlaneFitter {
+public:
+    /// @brief Constructor
+    /// @param fitThroughOrigin Whether or not the calculated plane fit should go through the origin
+    TotalLeastSquaresPlaneFitter(bool fitThroughOrigin = true)
+    : PlaneFitter(fitThroughOrigin)
+    {}
+
 private:
     /// @brief Calculates the best-fit plane for a given set of points.
     /// @return the plane normal and a point on the plane.
@@ -129,7 +159,11 @@ private:
         // Form centered data matrix (n x 3)
         Eigen::MatrixXd centered(n, 3);
         for (size_t i = 0; i < n; ++i) {
-            centered.row(i) = points[i] - centroid;
+            if (PlaneFitter::fitThroughOrigin_) {
+                centered.row(i) = points[i];
+            } else {
+                centered.row(i) = points[i] - centroid;
+            }
         }
 
         // Compute SVD
@@ -138,6 +172,10 @@ private:
         // Normal is the right singular vector corresponding to the smallest singular value (last column)
         Eigen::Vector3d normal = svd.matrixV().col(2).normalized();
 
-        return {normal, centroid};
+        if (PlaneFitter::fitThroughOrigin_) {
+            return {normal, Eigen::Vector3d::Zero()};
+        } else {
+            return {normal, centroid};
+        }
     }
 };

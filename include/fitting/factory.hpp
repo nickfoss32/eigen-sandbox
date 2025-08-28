@@ -8,7 +8,9 @@
 
 namespace po = boost::program_options;
 
+/// @brief PlaneFitter supported types
 enum class PlaneFitMode { TLS, OLS };
+
 std::istream& operator>>(std::istream& is, PlaneFitMode& mode) {
     std::string s;
     is >> s;
@@ -21,6 +23,7 @@ std::istream& operator>>(std::istream& is, PlaneFitMode& mode) {
     }
     return is;
 }
+
 std::ostream& operator<<(std::ostream& os, const PlaneFitMode& mode) {
     switch (mode) {
         case PlaneFitMode::TLS: os << "TLS"; break;
@@ -29,9 +32,12 @@ std::ostream& operator<<(std::ostream& os, const PlaneFitMode& mode) {
     return os;
 }
 
-// Factory to create the appropriate PlaneFitter based on mode
+/// @brief Factory to create the appropriate PlaneFitter based on mode
 class PlaneFitterFactory {
 public:
+    /// @brief Create a PlaneFitter
+    /// @param mode Type of PlaneFitter to create
+    /// @return A PlaneFitter
     static std::unique_ptr<PlaneFitter> create(PlaneFitMode mode) {
         switch (mode) {
             case PlaneFitMode::TLS:

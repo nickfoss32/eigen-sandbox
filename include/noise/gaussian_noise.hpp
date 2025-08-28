@@ -3,16 +3,17 @@
 #include <Eigen/Dense>
 #include <random>
 
+/// @brief Uses a Mersenne Twister random number generator to generate gaussian noise.
 class GaussianNoise {
 public:
-    // Constructor: Initialize with standard deviations for position and velocity noise
+    /// @brief Constructor: Initialize with standard deviations for position and velocity noise
     GaussianNoise(double sigma_pos, double sigma_vel) 
         : posNoise_(0.0, sigma_pos), velNoise_(0.0, sigma_vel) {
         std::random_device rd;
         gen_ = std::mt19937(rd());
     }
 
-    // Generate noise for a 6D state vector [x, y, z, vx, vy, vz]
+    /// @brief Generate noise for a 6D state vector [x, y, z, vx, vy, vz]
     Eigen::VectorXd generate_noise() const {
         Eigen::VectorXd noise(6);
         noise << posNoise_(gen_), posNoise_(gen_), posNoise_(gen_), // Position noise (x, y, z)
