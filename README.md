@@ -5,6 +5,7 @@ This repo contains a sandbox environment for testing a ballistic propagator base
 * Eigen3
 * nlohmann_json
 * Python 3.9+
+* SOFA (http://www.iausofa.org/index.html)
 
 # How to use
 There are 2 apps and 1 plot script in this repository:

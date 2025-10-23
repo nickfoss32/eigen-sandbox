@@ -18,6 +18,29 @@ except FileNotFoundError:
     print(f"Error: File '{args.trajectory_file}' not found.")
     exit(1)
 
+# Extract and format summary metadata
+summary = data.get("summary", {})
+simulation = summary.get("simulation", {})
+launch = simulation.get("launch", {})
+noise = simulation.get("noise", {})
+coordFrame = simulation.get("coordinate_frame", {})
+
+# Format metadata as a string
+metadata_text = (
+    "<b>Simulation Metadata</b><br>"
+    f"Coordinate Frame: {coordFrame}<br>"
+    f"Start Time: {simulation.get('start_time', 'N/A')} s<br>"
+    f"Timestep: {simulation.get('timestep', 'N/A')} s<br>"
+    f"Launch Altitude: {launch.get('altitude', 'N/A')} m<br>"
+    f"Launch Azimuth: {launch.get('azimuth', 'N/A')}°<br>"
+    f"Launch Elevation: {launch.get('elevation', 'N/A')}°<br>"
+    f"Launch Latitude: {launch.get('latitude', 'N/A')}°<br>"
+    f"Launch Longitude: {launch.get('longitude', 'N/A')}°<br>"
+    f"Launch Velocity: {launch.get('velocity', 'N/A')} m/s<br>"
+    f"Noise Sigma Pos: {noise.get('sigma_pos', 'N/A')} m<br>"
+    f"Noise Sigma Vel: {noise.get('sigma_vel', 'N/A')} m/s<br>"
+)
+
 # Extract time and state vectors
 times = [point["time"] for point in data["points"]]
 x = np.array([point["state"][0] for point in data["points"]])
@@ -121,6 +144,7 @@ for _, row in gdf.iterrows():
         x_country = earth_radius * np.cos(lon_rad) * np.cos(lat_rad)
         y_country = earth_radius * np.sin(lon_rad) * np.cos(lat_rad)
         z_country = earth_radius * np.sin(lat_rad)
+
         full_country_traces.append(
             go.Scatter3d(
                 x=x_country,
@@ -241,26 +265,6 @@ updatemenus = [
     )
 ]
 
-# Extract and format summary metadata
-summary = data.get("summary", {})
-simulation = summary.get("simulation", {})
-launch = simulation.get("launch", {})
-noise = simulation.get("noise", {})
-
-# Format metadata as a string
-metadata_text = (
-    "<b>Simulation Metadata</b><br>"
-    f"Launch Altitude: {launch.get('altitude', 'N/A')} m<br>"
-    f"Launch Azimuth: {launch.get('azimuth', 'N/A')}°<br>"
-    f"Launch Elevation: {launch.get('elevation', 'N/A')}°<br>"
-    f"Launch Latitude: {launch.get('latitude', 'N/A')}°<br>"
-    f"Launch Longitude: {launch.get('longitude', 'N/A')}°<br>"
-    f"Launch Velocity: {launch.get('velocity', 'N/A')} m/s<br>"
-    f"Noise Sigma Pos: {noise.get('sigma_pos', 'N/A')} m<br>"
-    f"Noise Sigma Vel: {noise.get('sigma_vel', 'N/A')} m/s<br>"
-    f"Timestep: {simulation.get('timestep', 'N/A')} s"
-)
-
 # Create figure
 data_traces = [globe_trace_full, globe_trace_zoomed, trajectory_trace]
 if plane_trace:
@@ -272,7 +276,7 @@ fig = go.Figure(data=data_traces)
 filename = os.path.basename(args.trajectory_file)
 fig.update_layout(
     title=dict(
-        text=f"ECEF Track Trajectory from: {filename}",
+        text= "ECEF Track Trajectory from: {filename}",
         x=0.5,
         xanchor="center",
         y=0.95,

@@ -1,4 +1,4 @@
-#include <transforms/lla_to_ecef.hpp>
+#include <transforms/coord_transforms.hpp>
 #include <propagator/propagator.hpp>
 #include <integrator/rk4.hpp>
 #include <dynamics/gravity.hpp>
@@ -8,6 +8,7 @@
 #include <Eigen/Dense>
 #include <nlohmann/json.hpp>
 #include <boost/program_options.hpp>
+#include <sofa.h>
 
 #include <fstream>
 #include <iostream>
@@ -32,7 +33,9 @@ int main(int argc, char* argv[]) {
         ("sigma-vel", po::value<double>()->default_value(100.0), "Simulation position noise standard deviation (m/s)")
         ("timestep", po::value<double>()->default_value(0.1), "Timestep size to use for propagator (seconds)")
         ("propagation-time", po::value<double>()->default_value(1000.0), "Amount of time to propagate (seconds).")
-        ("output,o", po::value<std::string>()->default_value("track_points.json"), "Output JSON file with simulated trajectory points");
+        ("start-time", po::value<std::string>()->default_value("2025-08-28 20:30:00"), "Simulation start time (YYYY-MM-DD HH:MM:SS UTC)")
+        ("output,o", po::value<std::string>()->default_value("track_points.json"), "Output JSON file with simulated trajectory points")
+        ("coordinate-frame,c", po::value<CoordinateFrame>()->default_value(CoordinateFrame::ECEF), "Coordinate frame to produce data in.");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -54,9 +57,30 @@ int main(int argc, char* argv[]) {
     double phi = vm["azimuth"].as<double>() * (M_PI/180); // Azimuth angle (convert to radians)
     double sigma_pos = vm["sigma-pos"].as<double>(); // Standard deviation for position noise (meters)
     double sigma_vel = vm["sigma-vel"].as<double>();  // Standard deviation for velocity noise (m/s)
+    CoordinateFrame coordinateframe = vm["coordinate-frame"].as<CoordinateFrame>(); // coordinate frame to use
+    std::string start_time = vm["start-time"].as<std::string>();
+
+    /// Parse start time (YYYY-MM-DD HH:MM:SS UTC)
+    int year, month, day, hour, min;
+    double sec;
+    int parsed = sscanf(start_time.c_str(), "%d-%d-%d %d:%d:%lf", &year, &month, &day, &hour, &min, &sec);
+    if (parsed != 6) {
+        std::cerr << "Invalid start-time format. Expected YYYY-MM-DD HH:MM:SS, got: " << start_time << std::endl;
+        return 1;
+    }
+
+    /// Convert start time to seconds since J2000 using SOFA
+    double jd1, jd2;
+    int status = iauDtf2d("UTC", year, month, day, hour, min, sec, &jd1, &jd2);
+    if (status != 0) {
+        std::cerr << "Failed to compute Julian Date for start time: status " << status << std::endl;
+        return 1;
+    }
+    double t0 = (jd1 + jd2 - 2451545.0) * 86400.0; // Seconds since J2000
 
     // Convert launch point to ECEF
-    auto ecef_pos = lla_to_ecef(ref_lat, ref_lon, ref_alt);
+    auto coordTxfms = std::make_shared<CoordTransforms>(IERS_EOP_FILE); // IERS_EOP_FILE defined by CMake
+    auto ecef_pos = coordTxfms->lla_to_ecef(ref_lat, ref_lon, ref_alt);
 
     // Compute initial velocity in local ENU frame
     Eigen::Vector3d v_enu;
@@ -77,16 +101,22 @@ int main(int argc, char* argv[]) {
     Eigen::VectorXd initial_state(6);
     initial_state << ecef_pos, ecef_vel;
 
+    // convert initial state to ECI if in ECI coordinate frame
+    if (coordinateframe == CoordinateFrame::ECI)
+    {
+        initial_state = coordTxfms->ecef_to_eci(initial_state, t0);
+    }
+
     // std::cout << "initial state: " << std::fixed << std::setprecision(4) << std::endl << initial_state.transpose() << std::endl;
 
     // create a propagator to model this trajectory
     auto earth_gravity = std::make_shared<J2Gravity>();
-    auto dynamics = std::make_shared<Ballistic3D>(earth_gravity);
+    auto dynamics = std::make_shared<Ballistic3D>(coordinateframe, earth_gravity);
     auto integrator = std::make_shared<RK4Integrator>();
-    Propagator propagator(dynamics, integrator, dt);
+    Propagator propagator(dynamics, integrator, dt, coordinateframe, coordTxfms);
 
     // Propagate the state
-    auto trajectory = propagator.propagate(0.0, initial_state, tf);
+    auto trajectory = propagator.propagate(t0, initial_state, t0+tf);
 
     // JSON array to store trajectory data
     nlohmann::json traj_json = nlohmann::json::array();
@@ -105,7 +135,7 @@ int main(int argc, char* argv[]) {
             // std::cout << "Track falling after 5 consecutive points. Stopping simulation." << std::endl;
             break;
         }
-        else if (t != 0.0 && ecef_to_lla(state.head(3))[2] <= 0.0)
+        else if (t != 0.0 && coordTxfms->ecef_to_lla(state.head(3))[2] <= 0.0)
         {
             // std::cout << "Impact reached. Stopping simulation." << std::endl;
             break;
@@ -135,6 +165,8 @@ int main(int argc, char* argv[]) {
     data_json["summary"]["simulation"]["noise"]["sigma_pos"] = sigma_pos;
     data_json["summary"]["simulation"]["noise"]["sigma_vel"] = sigma_vel;
     data_json["summary"]["simulation"]["timestep"] = dt;
+    data_json["summary"]["simulation"]["coordinate_frame"] = (coordinateframe == CoordinateFrame::ECI ? "ECI" : "ECEF");
+    data_json["summary"]["simulation"]["start_time"] = start_time;
 
     // Write JSON to file
     auto output_file = vm["output"].as<std::string>();

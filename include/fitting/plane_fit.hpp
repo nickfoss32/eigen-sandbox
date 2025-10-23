@@ -52,6 +52,7 @@ public:
         Eigen::Vector3d pos_proj = pos - dist * n;
 
         Eigen::Vector3d vel_proj = vel - n.dot(vel) * n;
+        vel_proj = vel_proj.normalized() * vel.norm();
 
         Eigen::VectorXd state_proj(6);
         state_proj.head<3>() = pos_proj;
@@ -60,9 +61,8 @@ public:
         return state_proj;
     }
 
-protected:
     /// @brief Boolean indicating whether fit should go through the origin (0,0,0)
-    bool fitThroughOrigin_{true};
+    const bool fitThroughOrigin_{true};
 
 private:
     /// @brief Virtual interface for computing a best fit plane

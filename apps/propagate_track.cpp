@@ -26,7 +26,7 @@ int main(int argc, char* argv[]) {
         ("help,h", "Produce help message")
         ("input,i", po::value<std::string>()->required(), "Input JSON file with pre-recorded trajectory points")
         ("output,o", po::value<std::string>()->default_value("predicted_trajectory.json"), "Output JSON file with predicted trajectory points")
-        ("plane-fit-mode,m", po::value<PlaneFitMode>()->default_value(PlaneFitMode::OLS), "Type of plane fit to use for predicting trajectory (OLS or TLS)")
+        ("plane-fit-mode,m", po::value<PlaneFitMode>()->default_value(PlaneFitMode::TLS), "Type of plane fit to use for predicting trajectory (OLS or TLS)")
         ("timestep,t", po::value<double>()->default_value(0.1), "Timestep size to use for propagator (seconds)");
 
     po::variables_map vm;
@@ -65,6 +65,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    auto coordTxfms = std::make_shared<CoordTransforms>(IERS_EOP_FILE); // IERS_EOP_FILE defined by CMake
     std::vector<std::pair<double, Eigen::VectorXd>> input_points;
     for (const auto& point : input_json["points"]) {
         if (!point.contains("time") || !point.contains("state") || !point["state"].is_array() || point["state"].size() != 6) {
@@ -80,6 +81,12 @@ int main(int argc, char* argv[]) {
                  point["state"][3].get<double>(),
                  point["state"][4].get<double>(),
                  point["state"][5].get<double>();
+
+        // convert point to ECEF if necessary
+        if (input_json["summary"]["simulation"]["coordinate_frame"] == "ECI") {
+            state = coordTxfms->eci_to_ecef(state, t);
+        }
+
         input_points.emplace_back(t, state);
     }
 
@@ -123,9 +130,11 @@ int main(int argc, char* argv[]) {
 
     // create a propagator to model this trajectory
     auto earth_gravity = std::make_shared<J2Gravity>();
-    auto dynamics = std::make_shared<Ballistic3D>(earth_gravity);
+    CoordinateFrame coordinateFrame = CoordinateFrame::ECEF;
+    // CoordinateFrame coordinateFrame = ( (input_json["summary"]["simulation"]["coordinate_frame"] == "ECI") ? CoordinateFrame::ECI : CoordinateFrame::ECEF);
+    auto dynamics = std::make_shared<Ballistic3D>(coordinateFrame, earth_gravity);
     auto integrator = std::make_shared<RK4Integrator>();
-    Propagator propagator(dynamics, integrator, dt);
+    Propagator propagator(dynamics, integrator, dt, coordinateFrame, coordTxfms);
 
     // Propagate the state
     auto trajectory = propagator.propagate_to_impact(initial_time, initial_state);

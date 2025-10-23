@@ -9,9 +9,11 @@
 class Ballistic3D : public Dynamics {
 public:
     /// @brief Constructs a 3D ballistic dynamics model with specified gravity.
+    /// @param coordinateFrame Coordinate frame the dynamics object is configured to use.
     /// @param gravityModel gravity model to use for this system.
-    Ballistic3D(std::shared_ptr<GravityModel> gravityModel)
-     : gravityModel_(gravityModel)
+    Ballistic3D(CoordinateFrame coordinateFrame, std::shared_ptr<GravityModel> gravityModel)
+     : Dynamics(coordinateFrame),
+       gravityModel_(gravityModel)
     {}
 
     /// @brief Computes the time derivative of the state vector for a 3D ballistic trajectory.
@@ -31,6 +33,20 @@ public:
         Eigen::Vector3d a_total = gravityModel_->compute_force(r);
         // a_total += dragModel_->compute_force();
         // a_total += thrustModel_->compute_force();
+
+        // Add fictitious forces for ECEF frame
+        if (coordinateFrame_ == CoordinateFrame::ECEF) {
+            // Earth's angular velocity (rad/s)
+            Eigen::Vector3d omega(0.0, 0.0, 7.292115e-5);
+
+            // Coriolis acceleration: -2 * omega x v
+            Eigen::Vector3d a_coriolis = -2.0 * omega.cross(v);
+
+            // Centrifugal acceleration: -omega x (omega x r)
+            Eigen::Vector3d a_centrifugal = -omega.cross(omega.cross(r));
+
+            a_total += a_coriolis + a_centrifugal;
+        }
 
         // dv/dt
         der.segment<3>(3) = a_total;

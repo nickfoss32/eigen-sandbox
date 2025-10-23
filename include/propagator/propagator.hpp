@@ -2,15 +2,20 @@
 
 #include <dynamics/ballistic3d.hpp>
 #include <integrator/rk4.hpp>
-#include <transforms/lla_to_ecef.hpp>
+#include <transforms/coord_transforms.hpp>
 #include <vector>
 #include <memory>
 
 
 class Propagator {
 public:
-    Propagator(std::shared_ptr<Dynamics> dynamics, std::shared_ptr<Integrator> integrator, double timestep)
-     : dynamics_(dynamics), integrator_(integrator), timestep_(timestep)
+    Propagator(
+        std::shared_ptr<Dynamics> dynamics,
+        std::shared_ptr<Integrator> integrator,
+        double timestep,
+        CoordinateFrame frame,
+        std::shared_ptr<CoordTransforms> transforms
+    ) : dynamics_(dynamics), integrator_(integrator), timestep_(timestep)
     {}
 
     /// @brief propagate state to specific time
@@ -52,7 +57,18 @@ public:
         Eigen::VectorXd state = initial_state;
         trajectory.emplace_back(t, state);
 
-        while (ecef_to_lla(state.head(3))[2] > 0.0) {
+        while (true) {
+            // Convert state to ECEF if in ECI frame
+            Eigen::VectorXd state_ecef = (coordinateFrame_ == CoordinateFrame::ECI) ? coordTransforms_->eci_to_ecef(state, t) : state;
+
+            // Check altitude using ECEF-to-LLA conversion
+            Eigen::Vector3d lla = coordTransforms_->ecef_to_lla(state_ecef.head(3));
+            double altitude = lla(2); // Altitude in meters
+
+            if (altitude <= 0.0) {
+                break; // Ground impact detected
+            }
+
             double step_dt = timestep_;
             state = integrator_->step(t, state, step_dt, *dynamics_);
             t += step_dt;
@@ -69,4 +85,8 @@ private:
     std::shared_ptr<Integrator> integrator_;
     /// @brief timestep to use for propagation
     double timestep_;
+    /// @brief Coordinate frame to use
+    CoordinateFrame coordinateFrame_;
+    /// @brief coordinate transforms
+    std::shared_ptr<CoordTransforms> coordTransforms_;
 };
