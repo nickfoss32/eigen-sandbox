@@ -32,34 +32,44 @@ add_library(sofa::sofa ALIAS sofa)
 target_include_directories(sofa PUBLIC ${SOFA_SOURCE_DIR})
 set_target_properties(sofa PROPERTIES LINKER_LANGUAGE C)
 
-# Also expose SOFA include dir as a variable so existing code using ${SOFA_INCLUDE_DIR} continues to work
-set(SOFA_INCLUDE_DIR ${SOFA_SOURCE_DIR} CACHE INTERNAL "SOFA include directory")
+# build tracking library
+add_subdirectory(src)
 
 # build apps
 add_executable(propagate-track apps/propagate_track.cpp)
 target_compile_definitions(propagate-track PRIVATE IERS_EOP_FILE="${IERS_EOP_FILE}")
-target_include_directories(propagate-track PRIVATE include ${SOFA_INCLUDE_DIR})
+target_include_directories(propagate-track PRIVATE include)
 target_link_libraries(propagate-track
     PRIVATE
         Eigen3::Eigen
         nlohmann_json::nlohmann_json
         Boost::program_options
-        sofa::sofa
+        tracking::transforms
 )
 
 add_executable(generate-data apps/generate_data.cpp)
 target_compile_definitions(generate-data PRIVATE IERS_EOP_FILE="${IERS_EOP_FILE}")
-target_include_directories(generate-data PRIVATE include ${SOFA_INCLUDE_DIR})
+target_include_directories(generate-data PRIVATE include)
 target_link_libraries(generate-data
     PRIVATE
         Eigen3::Eigen
         nlohmann_json::nlohmann_json
         Boost::program_options
-        sofa::sofa
+        tracking::transforms
 )
 
 # Optionally build tests
 if(BUILD_TESTS)
-  enable_testing()
-  add_subdirectory(test)
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG        v1.17.0
+    )
+    # # Optionally avoid installing gtest as a project install
+    # set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+
+    enable_testing()
+    add_subdirectory(test)
 endif()

@@ -79,7 +79,7 @@ int main(int argc, char* argv[]) {
     double t0 = (jd1 + jd2 - 2451545.0) * 86400.0; // Seconds since J2000
 
     // Convert launch point to ECEF
-    auto coordTxfms = std::make_shared<CoordTransforms>(IERS_EOP_FILE); // IERS_EOP_FILE defined by CMake
+    auto coordTxfms = std::make_shared<transforms::CoordTransforms>(IERS_EOP_FILE); // IERS_EOP_FILE defined by CMake
     auto ecef_pos = coordTxfms->lla_to_ecef(ref_lat, ref_lon, ref_alt);
 
     // Compute initial velocity in local ENU frame

@@ -14,7 +14,7 @@ public:
         std::shared_ptr<Integrator> integrator,
         double timestep,
         CoordinateFrame frame,
-        std::shared_ptr<CoordTransforms> transforms
+        std::shared_ptr<transforms::CoordTransforms> transforms
     ) : dynamics_(dynamics), integrator_(integrator), timestep_(timestep)
     {}
 
@@ -88,5 +88,5 @@ private:
     /// @brief Coordinate frame to use
     CoordinateFrame coordinateFrame_;
     /// @brief coordinate transforms
-    std::shared_ptr<CoordTransforms> coordTransforms_;
+    std::shared_ptr<transforms::CoordTransforms> coordTransforms_;
 };

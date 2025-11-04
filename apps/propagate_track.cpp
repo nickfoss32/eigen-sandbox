@@ -65,7 +65,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    auto coordTxfms = std::make_shared<CoordTransforms>(IERS_EOP_FILE); // IERS_EOP_FILE defined by CMake
+    auto coordTxfms = std::make_shared<transforms::CoordTransforms>(IERS_EOP_FILE); // IERS_EOP_FILE defined by CMake
     std::vector<std::pair<double, Eigen::VectorXd>> input_points;
     for (const auto& point : input_json["points"]) {
         if (!point.contains("time") || !point.contains("state") || !point["state"].is_array() || point["state"].size() != 6) {

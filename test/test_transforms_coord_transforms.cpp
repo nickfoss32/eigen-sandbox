@@ -11,7 +11,7 @@ TEST(CoordTransformsTest, ECEFtoECIAndBack) {
 
     double time_seconds = 3600.0; // 1 hour after epoch
 
-    auto coord_transforms = CoordTransforms("data/finals2000A.all");
+    auto coord_transforms = transforms::CoordTransforms(IERS_EOP_FILE);
     auto state_eci = coord_transforms.ecef_to_eci(state_ecef, time_seconds);
     auto state_ecef_converted = coord_transforms.eci_to_ecef(state_eci, time_seconds);
 
@@ -41,7 +41,7 @@ TEST(CoordTransformsTest, ECItoECEFAndBack) {
 
     double time_seconds = 7200.0; // 2 hours after epoch
 
-    auto coord_transforms = CoordTransforms("data/finals2000A.all");
+    auto coord_transforms = transforms::CoordTransforms(IERS_EOP_FILE);
     auto state_ecef = coord_transforms.eci_to_ecef(state_eci, time_seconds);
     auto state_eci_converted = coord_transforms.ecef_to_eci(state_ecef, time_seconds);
 
