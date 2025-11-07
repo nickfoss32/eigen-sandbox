@@ -1,6 +1,7 @@
 #include <transforms/coord_transforms.hpp>
 #include <propagator/propagator.hpp>
 #include <integrator/rk4.hpp>
+#include <dynamics/dynamics.hpp>
 #include <dynamics/gravity.hpp>
 #include <dynamics/ballistic3d.hpp>
 #include <noise/gaussian_noise.hpp>
@@ -35,7 +36,7 @@ int main(int argc, char* argv[]) {
         ("propagation-time", po::value<double>()->default_value(1000.0), "Amount of time to propagate (seconds).")
         ("start-time", po::value<std::string>()->default_value("2025-08-28 20:30:00"), "Simulation start time (YYYY-MM-DD HH:MM:SS UTC)")
         ("output,o", po::value<std::string>()->default_value("track_points.json"), "Output JSON file with simulated trajectory points")
-        ("coordinate-frame,c", po::value<CoordinateFrame>()->default_value(CoordinateFrame::ECEF), "Coordinate frame to produce data in.");
+        ("coordinate-frame,c", po::value<dynamics::CoordinateFrame>()->default_value(dynamics::CoordinateFrame::ECEF), "Coordinate frame to produce data in.");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -57,7 +58,7 @@ int main(int argc, char* argv[]) {
     double phi = vm["azimuth"].as<double>() * (M_PI/180); // Azimuth angle (convert to radians)
     double sigma_pos = vm["sigma-pos"].as<double>(); // Standard deviation for position noise (meters)
     double sigma_vel = vm["sigma-vel"].as<double>();  // Standard deviation for velocity noise (m/s)
-    CoordinateFrame coordinateframe = vm["coordinate-frame"].as<CoordinateFrame>(); // coordinate frame to use
+    auto coordinateframe = vm["coordinate-frame"].as<dynamics::CoordinateFrame>(); // coordinate frame to use
     std::string start_time = vm["start-time"].as<std::string>();
 
     /// Parse start time (YYYY-MM-DD HH:MM:SS UTC)
@@ -102,7 +103,7 @@ int main(int argc, char* argv[]) {
     initial_state << ecef_pos, ecef_vel;
 
     // convert initial state to ECI if in ECI coordinate frame
-    if (coordinateframe == CoordinateFrame::ECI)
+    if (coordinateframe == dynamics::CoordinateFrame::ECI)
     {
         initial_state = coordTxfms->ecef_to_eci(initial_state, t0);
     }
@@ -110,10 +111,10 @@ int main(int argc, char* argv[]) {
     // std::cout << "initial state: " << std::fixed << std::setprecision(4) << std::endl << initial_state.transpose() << std::endl;
 
     // create a propagator to model this trajectory
-    auto earth_gravity = std::make_shared<J2Gravity>();
-    auto dynamics = std::make_shared<Ballistic3D>(coordinateframe, earth_gravity);
-    auto integrator = std::make_shared<RK4Integrator>();
-    Propagator propagator(dynamics, integrator, dt, coordinateframe, coordTxfms);
+    auto earth_gravity = std::make_shared<dynamics::J2Gravity>();
+    auto dynamics = std::make_shared<dynamics::Ballistic3D>(coordinateframe, earth_gravity);
+    auto integrator = std::make_shared<integrator::RK4Integrator>();
+    propagator::Propagator propagator(dynamics, integrator, dt, coordinateframe, coordTxfms);
 
     // Propagate the state
     auto trajectory = propagator.propagate(t0, initial_state, t0+tf);
@@ -122,7 +123,7 @@ int main(int argc, char* argv[]) {
     nlohmann::json traj_json = nlohmann::json::array();
     double prevTrackAltitude = 0.0;
     int trackFallingCount = 0;
-    GaussianNoise noise_generator(sigma_pos, sigma_vel); // Initialize noise generator
+    noise::GaussianNoise noise_generator(sigma_pos, sigma_vel); // Initialize noise generator
     for (auto& entry : trajectory) {
         double t = entry.first;
         auto& state = entry.second;
@@ -165,7 +166,7 @@ int main(int argc, char* argv[]) {
     data_json["summary"]["simulation"]["noise"]["sigma_pos"] = sigma_pos;
     data_json["summary"]["simulation"]["noise"]["sigma_vel"] = sigma_vel;
     data_json["summary"]["simulation"]["timestep"] = dt;
-    data_json["summary"]["simulation"]["coordinate_frame"] = (coordinateframe == CoordinateFrame::ECI ? "ECI" : "ECEF");
+    data_json["summary"]["simulation"]["coordinate_frame"] = (coordinateframe == dynamics::CoordinateFrame::ECI ? "ECI" : "ECEF");
     data_json["summary"]["simulation"]["start_time"] = start_time;
 
     // Write JSON to file

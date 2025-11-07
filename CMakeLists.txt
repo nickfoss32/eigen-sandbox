@@ -44,7 +44,8 @@ target_link_libraries(propagate-track
         Eigen3::Eigen
         nlohmann_json::nlohmann_json
         Boost::program_options
-        tracking::transforms
+        tracking::fitting
+        tracking::propagator
 )
 
 add_executable(generate-data apps/generate_data.cpp)
@@ -55,7 +56,8 @@ target_link_libraries(generate-data
         Eigen3::Eigen
         nlohmann_json::nlohmann_json
         Boost::program_options
-        tracking::transforms
+        tracking::noise
+        tracking::propagator
 )
 
 # Optionally build tests

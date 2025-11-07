@@ -1,17 +1,16 @@
 #pragma once
 
 #include <fitting/plane_fit.hpp>
-#include <boost/program_options.hpp>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <stdexcept>
 
-namespace po = boost::program_options;
-
+namespace fitting {
 /// @brief PlaneFitter supported types
 enum class PlaneFitMode { TLS, OLS };
 
-std::istream& operator>>(std::istream& is, PlaneFitMode& mode) {
+inline std::istream& operator>>(std::istream& is, PlaneFitMode& mode) {
     std::string s;
     is >> s;
     if (s == "TLS" || s == "tls") {
@@ -19,12 +18,12 @@ std::istream& operator>>(std::istream& is, PlaneFitMode& mode) {
     } else if (s == "OLS" || s == "ols") {
         mode = PlaneFitMode::OLS;
     } else {
-        throw po::invalid_option_value(s);
+        throw std::invalid_argument("Invalid PlaneFitMode: " + s);
     }
     return is;
 }
 
-std::ostream& operator<<(std::ostream& os, const PlaneFitMode& mode) {
+inline std::ostream& operator<<(std::ostream& os, const PlaneFitMode& mode) {
     switch (mode) {
         case PlaneFitMode::TLS: os << "TLS"; break;
         case PlaneFitMode::OLS: os << "OLS"; break;
@@ -49,3 +48,4 @@ public:
         }
     }
 };
+} // namespace fitting

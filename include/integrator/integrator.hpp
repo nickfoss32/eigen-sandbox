@@ -1,8 +1,9 @@
 #pragma once
 
 #include <Eigen/Dense>
-#include "dynamics/dynamics.hpp"
+#include "dynamics.hpp"
 
+namespace integrator {
 /// @brief Abstract base class for numerical integrators that compute the next state of a system
 ///        by solving the differential equations defined by a dynamics model.
 class Integrator {
@@ -16,5 +17,6 @@ public:
     /// @param dt Time step for integration (in seconds).
     /// @param dyn Dynamics model providing the state derivative.
     /// @return The updated state vector after one integration step.
-    virtual Eigen::VectorXd step(double t, const Eigen::VectorXd& state, double dt, const Dynamics& dyn) const = 0;
+    virtual Eigen::VectorXd step(double t, const Eigen::VectorXd& state, double dt, const dynamics::IDynamics& dyn) const = 0;
 };
+} // namespace integrator
