@@ -1,6 +1,9 @@
 # dynamics lib
 add_subdirectory(dynamics)
 
+# fitting lib
+add_subdirectory(fitting)
+
 # integrator lib
 add_subdirectory(integrator)
 

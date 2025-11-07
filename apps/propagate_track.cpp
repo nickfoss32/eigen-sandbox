@@ -26,7 +26,7 @@ int main(int argc, char* argv[]) {
         ("help,h", "Produce help message")
         ("input,i", po::value<std::string>()->required(), "Input JSON file with pre-recorded trajectory points")
         ("output,o", po::value<std::string>()->default_value("predicted_trajectory.json"), "Output JSON file with predicted trajectory points")
-        ("plane-fit-mode,m", po::value<PlaneFitMode>()->default_value(PlaneFitMode::TLS), "Type of plane fit to use for predicting trajectory (OLS or TLS)")
+        ("plane-fit-mode,m", po::value<fitting::PlaneFitMode>()->default_value(fitting::PlaneFitMode::TLS), "Type of plane fit to use for predicting trajectory (OLS or TLS)")
         ("timestep,t", po::value<double>()->default_value(0.1), "Timestep size to use for propagator (seconds)");
 
     po::variables_map vm;
@@ -92,9 +92,9 @@ int main(int argc, char* argv[]) {
 
     // calculate best fit plane amongst points (fit through origin)
     std::optional<std::pair<Eigen::Vector3d, Eigen::Vector3d>> plane = std::nullopt;
-    PlaneFitMode mode = vm["plane-fit-mode"].as<PlaneFitMode>();
+    fitting::PlaneFitMode mode = vm["plane-fit-mode"].as<fitting::PlaneFitMode>();
     std::vector<Eigen::Vector3d> positions;
-    std::unique_ptr<PlaneFitter> planeFitter = nullptr;
+    std::unique_ptr<fitting::PlaneFitter> planeFitter = nullptr;
     positions.reserve(input_points.size()); // Pre-allocate for efficiency
     std::transform(
         input_points.begin(), input_points.end(), std::back_inserter(positions),
@@ -103,7 +103,7 @@ int main(int argc, char* argv[]) {
         }
     );
     try {
-        planeFitter = PlaneFitterFactory::create(mode);
+        planeFitter = fitting::PlaneFitterFactory::create(mode);
         plane = planeFitter->computeFit(positions);
     }
     catch(const std::exception& e) {
@@ -176,7 +176,7 @@ int main(int argc, char* argv[]) {
     data_json["summary"] = input_json["summary"];
     if (plane.has_value()) {
         const auto& [normal, point] = plane.value(); // Structured binding for clarity
-        data_json["summary"]["fit"]["type"] = (mode == PlaneFitMode::OLS ? "OLS" : "TLS");
+        data_json["summary"]["fit"]["type"] = (mode ==fitting::PlaneFitMode::OLS ? "OLS" : "TLS");
         data_json["summary"]["fit"]["normal"] = {normal[0], normal[1], normal[2]};
         data_json["summary"]["fit"]["point"] = {point[0], point[1], point[2]};
     }

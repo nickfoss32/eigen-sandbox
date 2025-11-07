@@ -45,6 +45,7 @@ target_link_libraries(propagate-track
         nlohmann_json::nlohmann_json
         Boost::program_options
         tracking::dynamics
+        tracking::fitting
         tracking::integrator
         tracking::transforms
 )
