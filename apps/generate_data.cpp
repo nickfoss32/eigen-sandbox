@@ -122,7 +122,7 @@ int main(int argc, char* argv[]) {
     nlohmann::json traj_json = nlohmann::json::array();
     double prevTrackAltitude = 0.0;
     int trackFallingCount = 0;
-    GaussianNoise noise_generator(sigma_pos, sigma_vel); // Initialize noise generator
+    noise::GaussianNoise noise_generator(sigma_pos, sigma_vel); // Initialize noise generator
     for (auto& entry : trajectory) {
         double t = entry.first;
         auto& state = entry.second;

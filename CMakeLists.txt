@@ -55,6 +55,7 @@ target_link_libraries(generate-data
         Eigen3::Eigen
         nlohmann_json::nlohmann_json
         Boost::program_options
+        tracking::noise
         tracking::transforms
 )
 
