@@ -1,3 +1,6 @@
+# dynamics lib
+add_subdirectory(dynamics)
+
 # noise lib
 add_subdirectory(noise)
 

@@ -1,19 +1,20 @@
 #pragma once
 
+#include <dynamics/dynamics.hpp>
 #include <dynamics/ballistic3d.hpp>
 #include <integrator/rk4.hpp>
 #include <transforms/coord_transforms.hpp>
 #include <vector>
 #include <memory>
 
-
+namespace propagator {
 class Propagator {
 public:
     Propagator(
-        std::shared_ptr<Dynamics> dynamics,
+        std::shared_ptr<dynamics::IDynamics> dynamics,
         std::shared_ptr<Integrator> integrator,
         double timestep,
-        CoordinateFrame frame,
+        dynamics::CoordinateFrame frame,
         std::shared_ptr<transforms::CoordTransforms> transforms
     ) : dynamics_(dynamics), integrator_(integrator), timestep_(timestep)
     {}
@@ -59,7 +60,7 @@ public:
 
         while (true) {
             // Convert state to ECEF if in ECI frame
-            Eigen::VectorXd state_ecef = (coordinateFrame_ == CoordinateFrame::ECI) ? coordTransforms_->eci_to_ecef(state, t) : state;
+            Eigen::VectorXd state_ecef = (coordinateFrame_ == dynamics::CoordinateFrame::ECI) ? coordTransforms_->eci_to_ecef(state, t) : state;
 
             // Check altitude using ECEF-to-LLA conversion
             Eigen::Vector3d lla = coordTransforms_->ecef_to_lla(state_ecef.head(3));
@@ -80,13 +81,14 @@ public:
 
 private:
     /// @brief underlying system dynamics
-    std::shared_ptr<Dynamics> dynamics_;
+    std::shared_ptr<dynamics::IDynamics> dynamics_;
     /// @brief underlying integrator to use for propagation
     std::shared_ptr<Integrator> integrator_;
     /// @brief timestep to use for propagation
     double timestep_;
     /// @brief Coordinate frame to use
-    CoordinateFrame coordinateFrame_;
+    dynamics::CoordinateFrame coordinateFrame_;
     /// @brief coordinate transforms
     std::shared_ptr<transforms::CoordTransforms> coordTransforms_;
 };
+} // namespace propagator

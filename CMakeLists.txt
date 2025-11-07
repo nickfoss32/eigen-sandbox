@@ -44,6 +44,7 @@ target_link_libraries(propagate-track
         Eigen3::Eigen
         nlohmann_json::nlohmann_json
         Boost::program_options
+        tracking::dynamics
         tracking::transforms
 )
 
@@ -55,6 +56,7 @@ target_link_libraries(generate-data
         Eigen3::Eigen
         nlohmann_json::nlohmann_json
         Boost::program_options
+        tracking::dynamics
         tracking::noise
         tracking::transforms
 )

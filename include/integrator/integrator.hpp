@@ -16,5 +16,5 @@ public:
     /// @param dt Time step for integration (in seconds).
     /// @param dyn Dynamics model providing the state derivative.
     /// @return The updated state vector after one integration step.
-    virtual Eigen::VectorXd step(double t, const Eigen::VectorXd& state, double dt, const Dynamics& dyn) const = 0;
+    virtual Eigen::VectorXd step(double t, const Eigen::VectorXd& state, double dt, const dynamics::IDynamics& dyn) const = 0;
 };

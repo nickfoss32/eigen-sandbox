@@ -1,18 +1,16 @@
 #pragma once
 
 #include <Eigen/Dense>
-#include <boost/program_options.hpp>
 #include <stdexcept>
 
-namespace po = boost::program_options;
-
+namespace dynamics {
 /// @brief Enum to specify a coordinate frame
 enum class CoordinateFrame {
     ECI,  // Earth-Centered Inertial
     ECEF  // Earth-Centered Earth-Fixed
 };
 
-std::istream& operator>>(std::istream& is, CoordinateFrame& frame) {
+inline std::istream& operator>>(std::istream& is, CoordinateFrame& frame) {
     std::string s;
     is >> s;
     if (s == "ECI" || s == "eci") {
@@ -20,12 +18,12 @@ std::istream& operator>>(std::istream& is, CoordinateFrame& frame) {
     } else if (s == "ECEF" || s == "ecef") {
         frame = CoordinateFrame::ECEF;
     } else {
-        throw po::invalid_option_value(s);
+        throw std::invalid_argument("Invalid coordinate frame: " + s);
     }
     return is;
 }
 
-std::ostream& operator<<(std::ostream& os, const CoordinateFrame& frame) {
+inline std::ostream& operator<<(std::ostream& os, const CoordinateFrame& frame) {
     switch (frame) {
         case CoordinateFrame::ECI: os << "ECI"; break;
         case CoordinateFrame::ECEF: os << "ECEF"; break;
@@ -35,16 +33,16 @@ std::ostream& operator<<(std::ostream& os, const CoordinateFrame& frame) {
 
 /// @brief Base class defining how a system evolves by specifying the derivative of the state vector with respect to time
 ///        based on the physical laws governing the system.
-class Dynamics {
+class IDynamics {
 public:
     /// @brief Constructor
     /// @param coordinateFrame Coordinate frame the dynamics object is configured to use.
-    Dynamics(CoordinateFrame coordinateFrame)
+    IDynamics(CoordinateFrame coordinateFrame)
      : coordinateFrame_(coordinateFrame)
     {}
 
     /// @brief virtual dtor
-    virtual ~Dynamics() = default;
+    virtual ~IDynamics() = default;
     
     /// @brief Computes the time derivative of the state vector at a given time.
     /// @param t Current time (in seconds).
@@ -55,3 +53,4 @@ public:
     /// @brief The coordinate frame the dyanmics object is configured for.
     const CoordinateFrame coordinateFrame_{CoordinateFrame::ECEF};
 };
+} // namespace dynamics

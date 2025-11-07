@@ -129,12 +129,12 @@ int main(int argc, char* argv[]) {
     // std::cout << "initial state: " << std::fixed << std::setprecision(4) << std::endl << initial_state.transpose() << std::endl;
 
     // create a propagator to model this trajectory
-    auto earth_gravity = std::make_shared<J2Gravity>();
-    CoordinateFrame coordinateFrame = CoordinateFrame::ECEF;
+    auto earth_gravity = std::make_shared<dynamics::J2Gravity>();
+    dynamics::CoordinateFrame coordinateFrame = dynamics::CoordinateFrame::ECEF;
     // CoordinateFrame coordinateFrame = ( (input_json["summary"]["simulation"]["coordinate_frame"] == "ECI") ? CoordinateFrame::ECI : CoordinateFrame::ECEF);
-    auto dynamics = std::make_shared<Ballistic3D>(coordinateFrame, earth_gravity);
+    auto dynamics = std::make_shared<dynamics::Ballistic3D>(coordinateFrame, earth_gravity);
     auto integrator = std::make_shared<RK4Integrator>();
-    Propagator propagator(dynamics, integrator, dt, coordinateFrame, coordTxfms);
+    propagator::Propagator propagator(dynamics, integrator, dt, coordinateFrame, coordTxfms);
 
     // Propagate the state
     auto trajectory = propagator.propagate_to_impact(initial_time, initial_state);
