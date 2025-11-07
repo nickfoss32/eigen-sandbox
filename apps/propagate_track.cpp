@@ -133,7 +133,7 @@ int main(int argc, char* argv[]) {
     dynamics::CoordinateFrame coordinateFrame = dynamics::CoordinateFrame::ECEF;
     // CoordinateFrame coordinateFrame = ( (input_json["summary"]["simulation"]["coordinate_frame"] == "ECI") ? CoordinateFrame::ECI : CoordinateFrame::ECEF);
     auto dynamics = std::make_shared<dynamics::Ballistic3D>(coordinateFrame, earth_gravity);
-    auto integrator = std::make_shared<RK4Integrator>();
+    auto integrator = std::make_shared<integrator::RK4Integrator>();
     propagator::Propagator propagator(dynamics, integrator, dt, coordinateFrame, coordTxfms);
 
     // Propagate the state

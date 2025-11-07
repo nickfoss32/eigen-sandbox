@@ -113,7 +113,7 @@ int main(int argc, char* argv[]) {
     // create a propagator to model this trajectory
     auto earth_gravity = std::make_shared<dynamics::J2Gravity>();
     auto dynamics = std::make_shared<dynamics::Ballistic3D>(coordinateframe, earth_gravity);
-    auto integrator = std::make_shared<RK4Integrator>();
+    auto integrator = std::make_shared<integrator::RK4Integrator>();
     propagator::Propagator propagator(dynamics, integrator, dt, coordinateframe, coordTxfms);
 
     // Propagate the state

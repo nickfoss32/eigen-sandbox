@@ -12,7 +12,7 @@ class Propagator {
 public:
     Propagator(
         std::shared_ptr<dynamics::IDynamics> dynamics,
-        std::shared_ptr<Integrator> integrator,
+        std::shared_ptr<integrator::Integrator> integrator,
         double timestep,
         dynamics::CoordinateFrame frame,
         std::shared_ptr<transforms::CoordTransforms> transforms
@@ -83,7 +83,7 @@ private:
     /// @brief underlying system dynamics
     std::shared_ptr<dynamics::IDynamics> dynamics_;
     /// @brief underlying integrator to use for propagation
-    std::shared_ptr<Integrator> integrator_;
+    std::shared_ptr<integrator::Integrator> integrator_;
     /// @brief timestep to use for propagation
     double timestep_;
     /// @brief Coordinate frame to use

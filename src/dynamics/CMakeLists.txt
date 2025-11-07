@@ -7,5 +7,8 @@ add_library(dynamics
     gravity.cpp
 )
 add_library(tracking::dynamics ALIAS dynamics)
-target_include_directories(dynamics PRIVATE ${CMAKE_SOURCE_DIR}/include/dynamics)
+target_include_directories(dynamics 
+    PUBLIC 
+        ${CMAKE_SOURCE_DIR}/include/dynamics
+)
 target_link_libraries(dynamics PUBLIC Eigen3::Eigen)
