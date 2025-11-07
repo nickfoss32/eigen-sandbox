@@ -6,7 +6,7 @@ add_library(integrator
     rk4.cpp
 )
 add_library(tracking::integrator ALIAS integrator)
-target_include_directories(integrator PRIVATE ${CMAKE_SOURCE_DIR}/include/integrator)
+target_include_directories(integrator PUBLIC ${CMAKE_SOURCE_DIR}/include/integrator)
 target_link_libraries(integrator 
     PUBLIC 
         Eigen3::Eigen

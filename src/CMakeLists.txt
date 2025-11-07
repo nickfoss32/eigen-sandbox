@@ -10,5 +10,8 @@ add_subdirectory(integrator)
 # noise lib
 add_subdirectory(noise)
 
+# propagator lib
+add_subdirectory(propagator)
+
 # transforms lib
 add_subdirectory(transforms)
