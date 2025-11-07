@@ -88,7 +88,7 @@ public:
     /// @return 3D vector [x, y, z] in ECEF coordinates (meters).
     /// @throws std::runtime_error If the conversion fails (e.g., invalid ellipsoid).
     /// @note Uses SOFA's iauGd2gc with WGS84 ellipsoid (n=1).
-    auto lla_to_ecef(double lat_deg, double lon_deg, double alt_m) const -> Eigen::VectorXd;
+    auto lla_to_ecef(double lat_deg, double lon_deg, double alt_m) const -> Eigen::Vector3d;
 
     /// @brief Converts ECEF coordinates to geodetic LLA (Latitude, Longitude, Altitude).
     /// @param ecef 3D vector [x, y, z] in ECEF coordinates (meters).

@@ -11,7 +11,7 @@ public:
     /// @brief Constructs a 3D ballistic dynamics model with specified gravity.
     /// @param coordinateFrame Coordinate frame the dynamics object is configured to use.
     /// @param gravityModel gravity model to use for this system.
-    Ballistic3D(CoordinateFrame coordinateFrame, std::shared_ptr<GravityModel> gravityModel)
+    Ballistic3D(CoordinateFrame coordinateFrame, std::shared_ptr<IGravityModel> gravityModel)
      : Dynamics(coordinateFrame),
        gravityModel_(gravityModel)
     {}
@@ -56,7 +56,7 @@ public:
 
 private:
     /// @brief gravity model for this system's dynamics
-    std::shared_ptr<GravityModel> gravityModel_;
-    // std::shared_ptr<ThrustModel> thrustModel_;
-    // std::shared_ptr<DragModel> dragModel_;
+    std::shared_ptr<IGravityModel> gravityModel_;
+    // std::shared_ptr<IThrustModel> thrustModel_;
+    // std::shared_ptr<IDragModel> dragModel_;
 };

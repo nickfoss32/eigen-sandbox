@@ -2,13 +2,13 @@
 
 #include <Eigen/Dense>
 
-class GravityModel {
+class IGravityModel {
 public:
-    virtual ~GravityModel() = default;
+    virtual ~IGravityModel() = default;
     virtual Eigen::Vector3d compute_force(const Eigen::Vector3d& r) const = 0;
 };
 
-class PointMassGravity : public GravityModel {
+class PointMassGravity : public IGravityModel {
 private:
     double GM_; // Gravitational constant * Earth mass (m^3/s^2)
 
@@ -21,7 +21,7 @@ public:
     }
 };
 
-class J2Gravity : public GravityModel {
+class J2Gravity : public IGravityModel {
 private:
     double GM_; // Gravitational constant * Earth mass (m^3/s^2)
     double J2_; // J2 coefficient

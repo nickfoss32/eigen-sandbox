@@ -57,12 +57,11 @@ CoordTransforms::CoordTransforms(const std::string& filename)
 {}
 
 auto CoordTransforms::eci_to_ecef(const Eigen::VectorXd& state_eci, double t) const -> Eigen::VectorXd{
-    if (state_eci.size() != 6) {
-        throw std::invalid_argument("State vector must have 6 elements");
+    if (state_eci.size() != 3 && state_eci.size() != 6 && state_eci.size() != 9) {
+        throw std::invalid_argument("State vector must have 3, 6, or 9 elements");
     }
 
     Eigen::Vector3d r_eci = state_eci.segment<3>(0); // Position [x, y, z]
-    Eigen::Vector3d v_eci = state_eci.segment<3>(3); // Velocity [vx, vy, vz]
 
     // Convert time (seconds since J2000) to two-part Julian Date
     double jd_utc1 = 2451545.0; // J2000 epoch
@@ -107,22 +106,36 @@ auto CoordTransforms::eci_to_ecef(const Eigen::VectorXd& state_eci, double t) co
     // Transform position
     Eigen::Vector3d r_ecef = R * r_eci;
 
+    if (state_eci.size() == 3) {
+        return r_ecef;
+    }
+
     // Transform velocity, accounting for Earth's rotation
+    Eigen::Vector3d v_eci = state_eci.segment<3>(3);
     Eigen::Vector3d omega(0.0, 0.0, 7.292115e-5); // Earth's angular velocity (rad/s)
     Eigen::Vector3d v_ecef = R * v_eci - omega.cross(r_ecef);
 
-    Eigen::VectorXd state_ecef(6);
-    state_ecef << r_ecef, v_ecef;
+    if (state_eci.size() == 6) {
+        Eigen::VectorXd state_ecef(6);
+        state_ecef << r_ecef, v_ecef;
+        return state_ecef;
+    }
+
+    // Transform acceleration (9-state)
+    Eigen::Vector3d a_eci = state_eci.segment<3>(6);
+    Eigen::Vector3d a_ecef = R * a_eci - 2.0 * omega.cross(v_ecef) - omega.cross(omega.cross(r_ecef));
+
+    Eigen::VectorXd state_ecef(9);
+    state_ecef << r_ecef, v_ecef, a_ecef;
     return state_ecef;
 }
 
 auto CoordTransforms::ecef_to_eci(const Eigen::VectorXd& state_ecef, double t) const -> Eigen::VectorXd {
-    if (state_ecef.size() != 6) {
-        throw std::invalid_argument("State vector must have 6 elements");
+    if (state_ecef.size() != 3 && state_ecef.size() != 6 && state_ecef.size() != 9) {
+        throw std::invalid_argument("State vector must have 3, 6, or 9 elements");
     }
 
     Eigen::Vector3d r_ecef = state_ecef.segment<3>(0); // Position [x, y, z]
-    Eigen::Vector3d v_ecef = state_ecef.segment<3>(3); // Velocity [vx, vy, vz]
 
     // Convert time (seconds since J2000) to two-part Julian Date
     double jd_utc1 = 2451545.0; // J2000 epoch
@@ -167,16 +180,31 @@ auto CoordTransforms::ecef_to_eci(const Eigen::VectorXd& state_ecef, double t) c
     // Transform position
     Eigen::Vector3d r_eci = R * r_ecef;
 
+    if (state_ecef.size() == 3) {
+        return r_eci;
+    }
+
     // Transform velocity, accounting for Earth's rotation
+    Eigen::Vector3d v_ecef = state_ecef.segment<3>(3);
     Eigen::Vector3d omega(0.0, 0.0, 7.292115e-5); // Earth's angular velocity (rad/s)
     Eigen::Vector3d v_eci = R * (v_ecef + omega.cross(r_ecef));
 
-    Eigen::VectorXd state_eci(6);
-    state_eci << r_eci, v_eci;
+    if (state_ecef.size() == 6) {
+        Eigen::VectorXd state_eci(6);
+        state_eci << r_eci, v_eci;
+        return state_eci;
+    }
+
+    // Transform acceleration (9-state)
+    Eigen::Vector3d a_ecef = state_ecef.segment<3>(6);
+    Eigen::Vector3d a_eci = R * (a_ecef + 2.0 * omega.cross(v_ecef) + omega.cross(omega.cross(r_ecef)));
+
+    Eigen::VectorXd state_eci(9);
+    state_eci << r_eci, v_eci, a_eci;
     return state_eci;
 }
 
-auto CoordTransforms::lla_to_ecef(double lat_deg, double lon_deg, double alt_m) const -> Eigen::VectorXd {
+auto CoordTransforms::lla_to_ecef(double lat_deg, double lon_deg, double alt_m) const -> Eigen::Vector3d {
     // Convert degrees to radians
     double lat_rad = lat_deg * M_PI / 180.0;
     double lon_rad = lon_deg * M_PI / 180.0;

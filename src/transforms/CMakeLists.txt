@@ -7,7 +7,6 @@ add_library(transforms
 )
 add_library(tracking::transforms ALIAS transforms)
 target_include_directories(transforms PRIVATE ${CMAKE_SOURCE_DIR}/include/transforms)
-# target_include_directories(transforms PUBLIC ${SOFA_INCLUDE_DIR})
 target_link_libraries(transforms
     PUBLIC
         Eigen3::Eigen
