@@ -1,21 +1,24 @@
 
-#include <propagator/propagator.hpp>
-#include <integrator/rk4.hpp>
-#include <dynamics/gravity.hpp>
-#include <dynamics/ballistic3d.hpp>
-#include <fitting/plane_fit.hpp>
-#include <fitting/factory.hpp>
-
-#include <Eigen/Dense>
-#include <nlohmann/json.hpp>
-#include <boost/program_options.hpp>
-
 #include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
 #include <cmath>
 #include <memory>
+
+#include <Eigen/Dense>
+#include <nlohmann/json.hpp>
+#include <boost/program_options.hpp>
+
+#include <common/coordinate_frame.hpp>
+#include <dynamics/fictitious_forces.hpp>
+#include <dynamics/gravity.hpp>
+#include <dynamics/point_mass_dynamics.hpp>
+#include <fitting/plane_fit.hpp>
+#include <fitting/factory.hpp>
+#include <integrator/rk4.hpp>
+#include <propagator/factory.hpp>
+#include <transforms/coord_transforms.hpp>
 
 namespace po = boost::program_options;
 
@@ -128,16 +131,60 @@ int main(int argc, char* argv[]) {
 
     // std::cout << "initial state: " << std::fixed << std::setprecision(4) << std::endl << initial_state.transpose() << std::endl;
 
-    // create a propagator to model this trajectory
-    auto earth_gravity = std::make_shared<dynamics::J2Gravity>();
-    dynamics::CoordinateFrame coordinateFrame = dynamics::CoordinateFrame::ECEF;
+    common::CoordinateFrame coordinateFrame = common::CoordinateFrame::ECEF;
     // CoordinateFrame coordinateFrame = ( (input_json["summary"]["simulation"]["coordinate_frame"] == "ECI") ? CoordinateFrame::ECI : CoordinateFrame::ECEF);
-    auto dynamics = std::make_shared<dynamics::Ballistic3D>(coordinateFrame, earth_gravity);
-    auto integrator = std::make_shared<integrator::RK4Integrator>();
-    propagator::Propagator propagator(dynamics, integrator, dt, coordinateFrame, coordTxfms);
 
-    // Propagate the state
-    auto trajectory = propagator.propagate_to_impact(initial_time, initial_state);
+    // create a propagator to model this trajectory
+    // add forces acting on the point mass
+    // for rotating frames, add fictitious forces
+    std::vector<std::shared_ptr<dynamics::IForce>> forces;
+    forces.push_back(std::make_shared<dynamics::J2Gravity>());
+    if (coordinateFrame == common::CoordinateFrame::ECEF) {
+        forces.push_back(std::make_shared<dynamics::FictitiousForces>());
+    }
+    auto dynamics = std::make_shared<dynamics::PointMassDynamics>(forces);
+    auto integrator = std::make_shared<integrator::RK4Integrator>();
+    auto propagator = propagator::PropagatorFactory::create_numerical(dynamics, integrator, dt);
+
+    // Propagate the state to impact, checking altitude after each step
+    std::vector<std::pair<double, Eigen::VectorXd>> trajectory;
+    double t = initial_time;
+    Eigen::VectorXd state = initial_state;
+    trajectory.emplace_back(t, state);
+    
+    while (true) {
+        // Check altitude before propagating
+        double altitude = 0.0;
+        if (coordinateFrame == common::CoordinateFrame::ECI) {
+            Eigen::VectorXd state_ecef = coordTxfms->eci_to_ecef(state, t);
+            Eigen::Vector3d lla = coordTxfms->ecef_to_lla(state_ecef.head(3));
+            altitude = lla(2);
+        }
+        else {
+            Eigen::Vector3d lla = coordTxfms->ecef_to_lla(state.head(3));
+            altitude = lla(2);
+        }
+        
+        // Stop if we've reached ground level
+        if (altitude <= 0.0) {
+            break;
+        }
+        
+        // Propagate one timestep forward using propagate()
+        double t_next = t + dt;
+        auto step_traj = propagator->propagate(t, state, t_next);
+        
+        // Extract the final state from this propagation step
+        // step_traj will contain at least 2 points: (t, state) and (t_next, state_next)
+        if (step_traj.size() >= 2) {
+            t = step_traj.back().first;
+            state = step_traj.back().second;
+            trajectory.emplace_back(t, state);
+        } else {
+            std::cerr << "Error: Propagator returned insufficient trajectory points" << std::endl;
+            break;
+        }
+    }
 
     // JSON array to store trajectory data (input + propagated points)
     nlohmann::json traj_json = nlohmann::json::array();

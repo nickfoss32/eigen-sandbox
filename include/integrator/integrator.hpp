@@ -1,15 +1,16 @@
 #pragma once
 
+#include "dynamics/dynamics.hpp"
+
 #include <Eigen/Dense>
-#include "dynamics.hpp"
 
 namespace integrator {
-/// @brief Abstract base class for numerical integrators that compute the next state of a system
+/// @brief Interface for all numerical integrators that compute the next state of a system
 ///        by solving the differential equations defined by a dynamics model.
-class Integrator {
+class IIntegrator {
 public:
     /// @brief Virtual destructor to ensure proper cleanup of derived classes.
-    virtual ~Integrator() = default;
+    virtual ~IIntegrator() = default;
 
     /// @brief Computes the next state by integrating the state derivative over a time step.
     /// @param t Current time (in seconds).

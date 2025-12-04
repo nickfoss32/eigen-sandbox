@@ -1,0 +1,459 @@
+#include <gtest/gtest.h>
+
+#include "dynamics/point_mass_dynamics.hpp"
+#include "dynamics/force.hpp"
+
+#include <Eigen/Dense>
+
+#include <memory>
+#include <cmath>
+
+using namespace dynamics;
+
+// Mock force: constant acceleration in x-direction
+class ConstantForce : public IForce {
+public:
+    explicit ConstantForce(const Eigen::Vector3d& acceleration)
+        : acceleration_(acceleration) {}
+    
+    auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override {
+        return acceleration_;
+    }
+
+    auto compute_jacobian(const ForceContext& ctx) const -> std::pair<Eigen::Matrix3d, Eigen::Matrix3d> override {
+        return {Eigen::Matrix3d::Zero(), Eigen::Matrix3d::Zero()};
+    }
+    
+private:
+    Eigen::Vector3d acceleration_;
+};
+
+// Mock force: zero force
+class ZeroForce : public IForce {
+public:
+    auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override {
+        return Eigen::Vector3d::Zero();
+    }
+
+    auto compute_jacobian(const ForceContext& ctx) const -> std::pair<Eigen::Matrix3d, Eigen::Matrix3d> override {
+        return {Eigen::Matrix3d::Zero(), Eigen::Matrix3d::Zero()};
+    }
+};
+
+// Mock force: linear damping (F = -k*v)
+class DampingForce : public IForce {
+public:
+    explicit DampingForce(double coefficient) : k_(coefficient) {}
+    
+    auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override {
+        return -k_ * ctx.velocity;
+    }
+
+    auto compute_jacobian(const ForceContext& ctx) const -> std::pair<Eigen::Matrix3d, Eigen::Matrix3d> override {
+        return {Eigen::Matrix3d::Zero(), Eigen::Matrix3d::Zero()};
+    }
+    
+private:
+    double k_;
+};
+
+// Mock force: position-dependent (F = -k*r, like spring)
+class SpringForce : public IForce {
+public:
+    explicit SpringForce(double stiffness) : k_(stiffness) {}
+    
+    auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override {
+        return -k_ * ctx.position;
+    }
+
+    auto compute_jacobian(const ForceContext& ctx) const -> std::pair<Eigen::Matrix3d, Eigen::Matrix3d> override {
+        return {Eigen::Matrix3d::Zero(), Eigen::Matrix3d::Zero()};
+    }
+    
+private:
+    double k_;
+};
+
+// Mock force: time-dependent sinusoidal force
+class SinusoidalForce : public IForce {
+public:
+    explicit SinusoidalForce(double amplitude, double frequency)
+        : amplitude_(amplitude), omega_(2.0 * M_PI * frequency) {}
+    
+    auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override {
+        double magnitude = amplitude_ * std::sin(omega_ * ctx.t);
+        return Eigen::Vector3d(magnitude, 0.0, 0.0);
+    }
+
+    auto compute_jacobian(const ForceContext& ctx) const -> std::pair<Eigen::Matrix3d, Eigen::Matrix3d> override {
+        return {Eigen::Matrix3d::Zero(), Eigen::Matrix3d::Zero()};
+    }
+    
+private:
+    double amplitude_;
+    double omega_;
+};
+
+// Test fixture
+class PointMassDynamicsTest : public ::testing::Test {
+protected:
+    // Helper to create a simple 6D state
+    Eigen::VectorXd createState(const Eigen::Vector3d& pos, const Eigen::Vector3d& vel) {
+        Eigen::VectorXd state(6);
+        state << pos, vel;
+        return state;
+    }
+};
+
+// Test with no forces
+TEST_F(PointMassDynamicsTest, NoForces) {
+    std::vector<std::shared_ptr<IForce>> forces;
+    PointMassDynamics dynamics(forces);
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(4.0, 5.0, 6.0)
+    );
+    
+    Eigen::VectorXd deriv = dynamics.compute_dynamics(0.0, state);
+    
+    // Velocity components
+    EXPECT_DOUBLE_EQ(deriv(0), 4.0);
+    EXPECT_DOUBLE_EQ(deriv(1), 5.0);
+    EXPECT_DOUBLE_EQ(deriv(2), 6.0);
+    
+    // Zero acceleration
+    EXPECT_DOUBLE_EQ(deriv(3), 0.0);
+    EXPECT_DOUBLE_EQ(deriv(4), 0.0);
+    EXPECT_DOUBLE_EQ(deriv(5), 0.0);
+}
+
+// Test with single zero force
+TEST_F(PointMassDynamicsTest, SingleZeroForce) {
+    std::shared_ptr<IForce> zero_force = std::make_shared<ZeroForce>();
+    PointMassDynamics dynamics(std::vector{zero_force});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(10.0, 20.0, 30.0)
+    );
+    
+    Eigen::VectorXd deriv = dynamics.compute_dynamics(0.0, state);
+    
+    // Velocity components
+    EXPECT_DOUBLE_EQ(deriv(0), 10.0);
+    EXPECT_DOUBLE_EQ(deriv(1), 20.0);
+    EXPECT_DOUBLE_EQ(deriv(2), 30.0);
+    
+    // Zero acceleration
+    EXPECT_DOUBLE_EQ(deriv(3), 0.0);
+    EXPECT_DOUBLE_EQ(deriv(4), 0.0);
+    EXPECT_DOUBLE_EQ(deriv(5), 0.0);
+}
+
+// Test with single constant force
+TEST_F(PointMassDynamicsTest, SingleConstantForce) {
+    Eigen::Vector3d accel(1.0, 2.0, 3.0);
+    std::shared_ptr<IForce> constant_force = std::make_shared<ConstantForce>(accel);
+    PointMassDynamics dynamics(std::vector{constant_force});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(0.0, 0.0, 0.0),
+        Eigen::Vector3d(5.0, 6.0, 7.0)
+    );
+    
+    Eigen::VectorXd deriv = dynamics.compute_dynamics(0.0, state);
+    
+    // Velocity components
+    EXPECT_DOUBLE_EQ(deriv(0), 5.0);
+    EXPECT_DOUBLE_EQ(deriv(1), 6.0);
+    EXPECT_DOUBLE_EQ(deriv(2), 7.0);
+    
+    // Constant acceleration
+    EXPECT_DOUBLE_EQ(deriv(3), 1.0);
+    EXPECT_DOUBLE_EQ(deriv(4), 2.0);
+    EXPECT_DOUBLE_EQ(deriv(5), 3.0);
+}
+
+// Test with multiple forces
+TEST_F(PointMassDynamicsTest, MultipleForces) {
+    std::shared_ptr<IForce> force1 = std::make_shared<ConstantForce>(Eigen::Vector3d(1.0, 0.0, 0.0));
+    std::shared_ptr<IForce> force2 = std::make_shared<ConstantForce>(Eigen::Vector3d(0.0, 2.0, 0.0));
+    std::shared_ptr<IForce> force3 = std::make_shared<ConstantForce>(Eigen::Vector3d(0.0, 0.0, 3.0));
+    
+    PointMassDynamics dynamics(std::vector{force1, force2, force3});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(0.0, 0.0, 0.0),
+        Eigen::Vector3d(0.0, 0.0, 0.0)
+    );
+    
+    Eigen::VectorXd deriv = dynamics.compute_dynamics(0.0, state);
+    
+    // Forces should sum
+    EXPECT_DOUBLE_EQ(deriv(3), 1.0);
+    EXPECT_DOUBLE_EQ(deriv(4), 2.0);
+    EXPECT_DOUBLE_EQ(deriv(5), 3.0);
+}
+
+// Test with damping force (velocity-dependent)
+TEST_F(PointMassDynamicsTest, DampingForce) {
+    std::shared_ptr<IForce> damping = std::make_shared<DampingForce>(0.5);
+    PointMassDynamics dynamics(std::vector{damping});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(0.0, 0.0, 0.0),
+        Eigen::Vector3d(10.0, 20.0, 30.0)
+    );
+    
+    Eigen::VectorXd deriv = dynamics.compute_dynamics(0.0, state);
+    
+    // Acceleration should be -0.5 * velocity
+    EXPECT_DOUBLE_EQ(deriv(3), -5.0);
+    EXPECT_DOUBLE_EQ(deriv(4), -10.0);
+    EXPECT_DOUBLE_EQ(deriv(5), -15.0);
+}
+
+// Test with spring force (position-dependent)
+TEST_F(PointMassDynamicsTest, SpringForce) {
+    std::shared_ptr<IForce> spring = std::make_shared<SpringForce>(2.0);
+    PointMassDynamics dynamics(std::vector{spring});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(0.0, 0.0, 0.0)
+    );
+    
+    Eigen::VectorXd deriv = dynamics.compute_dynamics(0.0, state);
+    
+    // Acceleration should be -2.0 * position
+    EXPECT_DOUBLE_EQ(deriv(3), -2.0);
+    EXPECT_DOUBLE_EQ(deriv(4), -4.0);
+    EXPECT_DOUBLE_EQ(deriv(5), -6.0);
+}
+
+// Test with time-dependent force
+TEST_F(PointMassDynamicsTest, TimeDependentForce) {
+    std::shared_ptr<IForce> sinusoidal = std::make_shared<SinusoidalForce>(10.0, 1.0); // 10 m/s², 1 Hz
+    PointMassDynamics dynamics(std::vector{sinusoidal});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(0.0, 0.0, 0.0),
+        Eigen::Vector3d(0.0, 0.0, 0.0)
+    );
+    
+    // At t=0, sin(0) = 0
+    Eigen::VectorXd deriv0 = dynamics.compute_dynamics(0.0, state);
+    EXPECT_NEAR(deriv0(3), 0.0, 1e-10);
+    
+    // At t=0.25, sin(2π*0.25) = sin(π/2) = 1
+    Eigen::VectorXd deriv1 = dynamics.compute_dynamics(0.25, state);
+    EXPECT_NEAR(deriv1(3), 10.0, 1e-10);
+    
+    // At t=0.5, sin(2π*0.5) = sin(π) = 0
+    Eigen::VectorXd deriv2 = dynamics.compute_dynamics(0.5, state);
+    EXPECT_NEAR(deriv2(3), 0.0, 1e-10);
+}
+
+// Test that context is correctly populated
+TEST_F(PointMassDynamicsTest, ContextPopulation) {
+    class ContextCheckerForce : public IForce {
+    public:
+        auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override {
+            last_time = ctx.t;
+            last_position = ctx.position;
+            last_velocity = ctx.velocity;
+            return Eigen::Vector3d::Zero();
+        }
+
+        auto compute_jacobian(const ForceContext& ctx) const -> std::pair<Eigen::Matrix3d, Eigen::Matrix3d> override {
+            return {Eigen::Matrix3d::Zero(), Eigen::Matrix3d::Zero()};
+        }
+        
+        mutable double last_time;
+        mutable Eigen::Vector3d last_position;
+        mutable Eigen::Vector3d last_velocity;
+    };
+    
+    auto checker = std::make_shared<ContextCheckerForce>();
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{checker});
+    
+    double t = 5.0;
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(4.0, 5.0, 6.0)
+    );
+    
+    dynamics.compute_dynamics(t, state);
+    
+    EXPECT_DOUBLE_EQ(checker->last_time, 5.0);
+    EXPECT_EQ(checker->last_position, Eigen::Vector3d(1.0, 2.0, 3.0));
+    EXPECT_EQ(checker->last_velocity, Eigen::Vector3d(4.0, 5.0, 6.0));
+}
+
+// Test derivative vector size
+TEST_F(PointMassDynamicsTest, DerivativeVectorSize) {
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(0.0, 0.0, 0.0),
+        Eigen::Vector3d(0.0, 0.0, 0.0)
+    );
+    
+    Eigen::VectorXd deriv = dynamics.compute_dynamics(0.0, state);
+    
+    EXPECT_EQ(deriv.size(), 6);
+}
+
+// Test with opposing forces (cancellation)
+TEST_F(PointMassDynamicsTest, OpposingForces) {
+    std::shared_ptr<IForce> force1 = std::make_shared<ConstantForce>(Eigen::Vector3d(5.0, 0.0, 0.0));
+    std::shared_ptr<IForce> force2 = std::make_shared<ConstantForce>(Eigen::Vector3d(-5.0, 0.0, 0.0));
+    
+    PointMassDynamics dynamics(std::vector{force1, force2});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(0.0, 0.0, 0.0),
+        Eigen::Vector3d(0.0, 0.0, 0.0)
+    );
+    
+    Eigen::VectorXd deriv = dynamics.compute_dynamics(0.0, state);
+    
+    // Forces should cancel
+    EXPECT_DOUBLE_EQ(deriv(3), 0.0);
+    EXPECT_DOUBLE_EQ(deriv(4), 0.0);
+    EXPECT_DOUBLE_EQ(deriv(5), 0.0);
+}
+
+// Test with many forces
+TEST_F(PointMassDynamicsTest, ManyForces) {
+    std::vector<std::shared_ptr<IForce>> forces;
+    for (int i = 0; i < 10; ++i) {
+        forces.push_back(std::make_shared<ConstantForce>(Eigen::Vector3d(1.0, 0.0, 0.0)));
+    }
+    
+    PointMassDynamics dynamics(forces);
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(0.0, 0.0, 0.0),
+        Eigen::Vector3d(0.0, 0.0, 0.0)
+    );
+    
+    Eigen::VectorXd deriv = dynamics.compute_dynamics(0.0, state);
+    
+    // All forces should sum
+    EXPECT_DOUBLE_EQ(deriv(3), 10.0);
+}
+
+// Test velocity derivative equals velocity (state continuity)
+TEST_F(PointMassDynamicsTest, VelocityDerivativeEqualsVelocity) {
+    std::shared_ptr<IForce> force = std::make_shared<ConstantForce>(Eigen::Vector3d(1.0, 2.0, 3.0));
+    PointMassDynamics dynamics(std::vector{force});
+    
+    Eigen::Vector3d velocity(7.0, 8.0, 9.0);
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(0.0, 0.0, 0.0),
+        velocity
+    );
+    
+    Eigen::VectorXd deriv = dynamics.compute_dynamics(0.0, state);
+    
+    // First three components of derivative should equal velocity
+    EXPECT_DOUBLE_EQ(deriv(0), velocity(0));
+    EXPECT_DOUBLE_EQ(deriv(1), velocity(1));
+    EXPECT_DOUBLE_EQ(deriv(2), velocity(2));
+}
+
+// Test with zero velocity
+TEST_F(PointMassDynamicsTest, ZeroVelocity) {
+    std::shared_ptr<IForce> force = std::make_shared<ConstantForce>(Eigen::Vector3d(1.0, 2.0, 3.0));
+    PointMassDynamics dynamics(std::vector{force});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(5.0, 6.0, 7.0),
+        Eigen::Vector3d(0.0, 0.0, 0.0)
+    );
+    
+    Eigen::VectorXd deriv = dynamics.compute_dynamics(0.0, state);
+    
+    // Position derivative should be zero
+    EXPECT_DOUBLE_EQ(deriv(0), 0.0);
+    EXPECT_DOUBLE_EQ(deriv(1), 0.0);
+    EXPECT_DOUBLE_EQ(deriv(2), 0.0);
+    
+    // Still have acceleration
+    EXPECT_DOUBLE_EQ(deriv(3), 1.0);
+    EXPECT_DOUBLE_EQ(deriv(4), 2.0);
+    EXPECT_DOUBLE_EQ(deriv(5), 3.0);
+}
+
+// Test at different positions
+TEST_F(PointMassDynamicsTest, DifferentPositions) {
+    std::shared_ptr<IForce> spring = std::make_shared<SpringForce>(1.0);
+    PointMassDynamics dynamics(std::vector{spring});
+    
+    // Position A
+    Eigen::VectorXd state_a = createState(
+        Eigen::Vector3d(1.0, 0.0, 0.0),
+        Eigen::Vector3d(0.0, 0.0, 0.0)
+    );
+    Eigen::VectorXd deriv_a = dynamics.compute_dynamics(0.0, state_a);
+    EXPECT_DOUBLE_EQ(deriv_a(3), -1.0);
+    
+    // Position B
+    Eigen::VectorXd state_b = createState(
+        Eigen::Vector3d(2.0, 0.0, 0.0),
+        Eigen::Vector3d(0.0, 0.0, 0.0)
+    );
+    Eigen::VectorXd deriv_b = dynamics.compute_dynamics(0.0, state_b);
+    EXPECT_DOUBLE_EQ(deriv_b(3), -2.0);
+}
+
+// Test at different times
+TEST_F(PointMassDynamicsTest, DifferentTimes) {
+    std::shared_ptr<IForce> sinusoidal = std::make_shared<SinusoidalForce>(1.0, 1.0);
+    PointMassDynamics dynamics(std::vector{sinusoidal});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(0.0, 0.0, 0.0),
+        Eigen::Vector3d(0.0, 0.0, 0.0)
+    );
+    
+    Eigen::VectorXd deriv_t0 = dynamics.compute_dynamics(0.0, state);
+    Eigen::VectorXd deriv_t1 = dynamics.compute_dynamics(1.0, state);
+    
+    // Should be different due to time dependence
+    EXPECT_NE(deriv_t0(3), deriv_t1(3));
+}
+
+// Test with large values
+TEST_F(PointMassDynamicsTest, LargeValues) {
+    std::shared_ptr<IForce> force = std::make_shared<ConstantForce>(Eigen::Vector3d(1e6, 1e6, 1e6));
+    PointMassDynamics dynamics(std::vector{force});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1e9, 1e9, 1e9),
+        Eigen::Vector3d(1e6, 1e6, 1e6)
+    );
+    
+    Eigen::VectorXd deriv = dynamics.compute_dynamics(0.0, state);
+    
+    EXPECT_DOUBLE_EQ(deriv(0), 1e6);
+    EXPECT_DOUBLE_EQ(deriv(3), 1e6);
+}
+
+// Test with small values
+TEST_F(PointMassDynamicsTest, SmallValues) {
+    std::shared_ptr<IForce> force = std::make_shared<ConstantForce>(Eigen::Vector3d(1e-10, 1e-10, 1e-10));
+    PointMassDynamics dynamics(std::vector{force});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1e-15, 1e-15, 1e-15),
+        Eigen::Vector3d(1e-12, 1e-12, 1e-12)
+    );
+    
+    Eigen::VectorXd deriv = dynamics.compute_dynamics(0.0, state);
+    
+    EXPECT_DOUBLE_EQ(deriv(0), 1e-12);
+    EXPECT_DOUBLE_EQ(deriv(3), 1e-10);
+}

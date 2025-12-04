@@ -1,6 +1,7 @@
 #pragma once
 
-#include <fitting/plane_fit.hpp>
+#include "fitting/plane_fit.hpp"
+
 #include <iostream>
 #include <memory>
 #include <string>

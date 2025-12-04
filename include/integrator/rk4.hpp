@@ -1,11 +1,12 @@
 #pragma once
 
+#include "integrator/integrator.hpp"
+
 #include <Eigen/Dense>
-#include "integrator.hpp"
 
 namespace integrator {
 /// @brief Runge-Kutta 4 integrator implementation
-class RK4Integrator : public Integrator {
+class RK4Integrator : public IIntegrator {
 public:
     /// @brief Computes the next state by integrating the state derivative over a time step based on RK4 implementation.
     /// @param t Current time (in seconds).
