@@ -19,7 +19,7 @@ auto RigidBodyDynamics6DOF::compute_dynamics(double t, const Eigen::VectorXd& st
     // Extract state components
     Eigen::Vector3d position = state.segment<3>(0);
     Eigen::Vector3d velocity = state.segment<3>(3);
-    Eigen::Quaterniond quat(state(6), state(7), state(8), state(9)); // w, x, y, z
+    Eigen::Quaterniond quat = Eigen::Map<const Eigen::Quaterniond>(state.segment<4>(6).data()); // x, y, z, w
     quat.normalize(); // Ensure unit quaternion
     Eigen::Vector3d omega = state.segment<3>(10); // angular velocity in body frame
 
@@ -62,7 +62,7 @@ auto RigidBodyDynamics6DOF::compute_dynamics(double t, const Eigen::VectorXd& st
     Eigen::VectorXd state_dot(13);
     state_dot.segment<3>(0) = velocity;                    // dx/dt = v
     state_dot.segment<3>(3) = acceleration;                // dv/dt = a
-    state_dot.segment<4>(6) = quat_dot_quat.coeffs();     // dq/dt (w, x, y, z)
+    state_dot.segment<4>(6) = quat_dot_quat.coeffs();      // dq/dt (x, y, z, w)
     state_dot.segment<3>(10) = omega_dot;                  // dω/dt
 
     return state_dot;
@@ -83,7 +83,7 @@ auto RigidBodyDynamics6DOF::compute_jacobian(double t, const Eigen::VectorXd& st
     // Extract state components
     Eigen::Vector3d position = state.segment<3>(0);
     Eigen::Vector3d velocity = state.segment<3>(3);
-    Eigen::Quaterniond quat(state(6), state(7), state(8), state(9));
+    Eigen::Quaterniond quat = Eigen::Map<const Eigen::Quaterniond>(state.segment<4>(6).data());
     quat.normalize();
     Eigen::Vector3d omega = state.segment<3>(10);
     
@@ -126,12 +126,13 @@ auto RigidBodyDynamics6DOF::compute_jacobian(double t, const Eigen::VectorXd& st
     F.block<4, 4>(6, 6) = 0.5 * omega_matrix;
     
     // Block (6:10, 10:13): ∂q̇/∂ω
-    // Derivative of quaternion rate w.r.t. angular velocity
+    // For q̇ = 0.5 * q ⊗ [0, ω_x, ω_y, ω_z]:
+    // The result in (x, y, z, w) component order is:
     Eigen::Matrix<double, 4, 3> dq_dot_domega;
-    dq_dot_domega << -quat.x(), -quat.y(), -quat.z(),
-                      quat.w(), -quat.z(),  quat.y(),
-                      quat.z(),  quat.w(), -quat.x(),
-                     -quat.y(),  quat.x(),  quat.w();
+    dq_dot_domega <<  quat.w(),  quat.z(), -quat.y(),   // ∂x/∂ω
+                     -quat.z(),  quat.w(),  quat.x(),   // ∂y/∂ω
+                      quat.y(), -quat.x(),  quat.w(),   // ∂z/∂ω
+                     -quat.x(), -quat.y(), -quat.z();   // ∂w/∂ω
     
     F.block<4, 3>(6, 10) = 0.5 * dq_dot_domega;
     

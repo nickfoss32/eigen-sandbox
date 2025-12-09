@@ -54,8 +54,31 @@ inline double get_density_us76(double altitude) {
         return p / (287.05 * T);
     }
     
-    // Above 47 km - use exponential decay
-    return 0.00143 * std::exp(-(altitude - 47000.0) / 7200.0);
+    // Compute density at 47 km boundary for continuity
+    // Using upper stratosphere formula at exactly 47 km
+    constexpr double T_47km = 216.65 + 0.003 * (47000.0 - 25000.0);  // 282.65 K
+    const double p_47km = 2488.4 * std::pow(T_47km / 216.65, -11.388);  // Pa
+    const double rho_47km = p_47km / (287.05 * T_47km);  // kg/m³
+    
+    // Mesosphere and above (47+ km)
+    // Use different scale heights for different altitude ranges
+    // to better match observed atmospheric behavior
+    
+    if (altitude < 100000.0) {
+        // Mesosphere (47-100 km): scale height ~7 km
+        return rho_47km * std::exp(-(altitude - 47000.0) / 7200.0);
+    } else if (altitude < 200000.0) {
+        // Lower thermosphere (100-200 km): scale height ~20 km
+        // Match density at 100 km boundary
+        double rho_100km = rho_47km * std::exp(-(100000.0 - 47000.0) / 7200.0);
+        return rho_100km * std::exp(-(altitude - 100000.0) / 20000.0);
+    } else {
+        // Upper thermosphere (200+ km): scale height ~50 km
+        // Match density at 200 km boundary
+        double rho_100km = rho_47km * std::exp(-(100000.0 - 47000.0) / 7200.0);
+        double rho_200km = rho_100km * std::exp(-(200000.0 - 100000.0) / 20000.0);
+        return rho_200km * std::exp(-(altitude - 200000.0) / 50000.0);
+    }
 }
 
 } // namespace atmosphere

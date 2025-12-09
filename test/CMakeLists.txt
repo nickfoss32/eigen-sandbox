@@ -19,8 +19,13 @@ gtest_discover_tests(common_tests)
 
 # Dynamics tests
 add_executable(dynamics_tests
+    test_dynamics_aerodynamic_torque.cpp
+    test_dynamics_atmosphere.cpp
     test_dynamics_fictitious_forces.cpp
+    test_dynamics_gravity_gradient_torque.cpp
+    test_dynamics_gravity.cpp
     test_dynamics_point_mass_dynamics.cpp
+    test_dynamics_rigid_body_dynamics.cpp
 )
 target_link_libraries(dynamics_tests
     PRIVATE

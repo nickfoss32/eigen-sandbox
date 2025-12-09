@@ -76,16 +76,16 @@ auto AerodynamicTorque::compute_jacobian(const TorqueContext& ctx) const -> std:
     // τ = r_arm × F_drag
     // where F_drag = f(v_body) and v_body = Rᵀ(q)·v_inertial
     //
-    // For small attitude error δθ:
-    // v_body_perturbed ≈ (I + [δθ×])·v_body
-    // ∂v_body/∂δθ = -[v_body×]
+    // For small attitude error δθ (body rotates by δθ):
+    // v_body_perturbed ≈ (I - [δθ×])·v_body
+    // Therefore: ∂v_body/∂δθ = [v_body×]
     
     Eigen::Matrix3d v_body_skew;
     v_body_skew <<          0.0, -v_body(2),  v_body(1),
                     v_body(2),          0.0, -v_body(0),
                    -v_body(1),  v_body(0),          0.0;
     
-    Eigen::Matrix3d dv_body_dtheta = -v_body_skew;
+    Eigen::Matrix3d dv_body_dtheta = v_body_skew;
     
     // ∂F_drag/∂v_body: How drag force changes with body-frame velocity
     // F = drag_coeff · |v|² · v̂

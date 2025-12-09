@@ -457,3 +457,430 @@ TEST_F(PointMassDynamicsTest, SmallValues) {
     EXPECT_DOUBLE_EQ(deriv(0), 1e-12);
     EXPECT_DOUBLE_EQ(deriv(3), 1e-10);
 }
+
+// Add these tests at the end of the file, before the closing brace
+
+// ============================================================================
+// STATE DIMENSION TESTS
+// ============================================================================
+
+TEST_F(PointMassDynamicsTest, StateDimension) {
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{});
+    
+    EXPECT_EQ(dynamics.get_state_dimension(), 6);
+}
+
+TEST_F(PointMassDynamicsTest, StateDimensionWithForces) {
+    std::shared_ptr<IForce> force1 = std::make_shared<ConstantForce>(Eigen::Vector3d(1.0, 2.0, 3.0));
+    std::shared_ptr<IForce> force2 = std::make_shared<DampingForce>(0.5);
+    
+    PointMassDynamics dynamics(std::vector{force1, force2});
+    
+    // State dimension should be 6 regardless of number of forces
+    EXPECT_EQ(dynamics.get_state_dimension(), 6);
+}
+
+// ============================================================================
+// JACOBIAN TESTS
+// ============================================================================
+
+// Mock force with known Jacobian
+class LinearForceWithJacobian : public IForce {
+public:
+    explicit LinearForceWithJacobian(
+        const Eigen::Matrix3d& position_jacobian,
+        const Eigen::Matrix3d& velocity_jacobian)
+        : da_dr_(position_jacobian), da_dv_(velocity_jacobian) {}
+    
+    auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override {
+        return da_dr_ * ctx.position + da_dv_ * ctx.velocity;
+    }
+
+    auto compute_jacobian(const ForceContext& ctx) const -> std::pair<Eigen::Matrix3d, Eigen::Matrix3d> override {
+        return {da_dr_, da_dv_};
+    }
+    
+private:
+    Eigen::Matrix3d da_dr_;
+    Eigen::Matrix3d da_dv_;
+};
+
+TEST_F(PointMassDynamicsTest, JacobianSize) {
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(4.0, 5.0, 6.0)
+    );
+    
+    Eigen::MatrixXd F = dynamics.compute_jacobian(0.0, state);
+    
+    EXPECT_EQ(F.rows(), 6);
+    EXPECT_EQ(F.cols(), 6);
+}
+
+TEST_F(PointMassDynamicsTest, JacobianStructureNoForces) {
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(4.0, 5.0, 6.0)
+    );
+    
+    Eigen::MatrixXd F = dynamics.compute_jacobian(0.0, state);
+    
+    // Expected structure:
+    // F = [ 0   I ]
+    //     [ 0   0 ]
+    
+    // Upper-left: ∂ṙ/∂r = 0
+    EXPECT_TRUE((F.block<3,3>(0, 0).isZero()));
+    
+    // Upper-right: ∂ṙ/∂v = I
+    EXPECT_TRUE((F.block<3,3>(0, 3).isIdentity()));
+    
+    // Lower-left: ∂v̇/∂r = 0
+    EXPECT_TRUE((F.block<3,3>(3, 0).isZero()));
+    
+    // Lower-right: ∂v̇/∂v = 0
+    EXPECT_TRUE((F.block<3,3>(3, 3).isZero()));
+}
+
+TEST_F(PointMassDynamicsTest, JacobianUpperRightAlwaysIdentity) {
+    // The upper-right block should always be identity, regardless of forces
+    Eigen::Matrix3d da_dr = Eigen::Matrix3d::Random();
+    Eigen::Matrix3d da_dv = Eigen::Matrix3d::Random();
+    
+    auto force = std::make_shared<LinearForceWithJacobian>(da_dr, da_dv);
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{force});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(4.0, 5.0, 6.0)
+    );
+    
+    Eigen::MatrixXd F = dynamics.compute_jacobian(0.0, state);
+    
+    // ∂ṙ/∂v should always be identity
+    EXPECT_TRUE((F.block<3,3>(0, 3).isIdentity()));
+}
+
+TEST_F(PointMassDynamicsTest, JacobianSingleForce) {
+    // Create force with known Jacobian
+    Eigen::Matrix3d da_dr;
+    da_dr << 1.0, 0.0, 0.0,
+             0.0, 2.0, 0.0,
+             0.0, 0.0, 3.0;
+    
+    Eigen::Matrix3d da_dv;
+    da_dv << -0.1, 0.0, 0.0,
+             0.0, -0.2, 0.0,
+             0.0, 0.0, -0.3;
+    
+    auto force = std::make_shared<LinearForceWithJacobian>(da_dr, da_dv);
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{force});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(4.0, 5.0, 6.0)
+    );
+    
+    Eigen::MatrixXd F = dynamics.compute_jacobian(0.0, state);
+    
+    // Check lower-left block: ∂v̇/∂r
+    EXPECT_TRUE((F.block<3,3>(3, 0).isApprox(da_dr)));
+    
+    // Check lower-right block: ∂v̇/∂v
+    EXPECT_TRUE((F.block<3,3>(3, 3).isApprox(da_dv)));
+}
+
+TEST_F(PointMassDynamicsTest, JacobianMultipleForcesSum) {
+    // Create two forces with known Jacobians
+    Eigen::Matrix3d da_dr1 = Eigen::Matrix3d::Identity() * 1.0;
+    Eigen::Matrix3d da_dv1 = Eigen::Matrix3d::Identity() * -0.1;
+    
+    Eigen::Matrix3d da_dr2 = Eigen::Matrix3d::Identity() * 2.0;
+    Eigen::Matrix3d da_dv2 = Eigen::Matrix3d::Identity() * -0.2;
+    
+    auto force1 = std::make_shared<LinearForceWithJacobian>(da_dr1, da_dv1);
+    auto force2 = std::make_shared<LinearForceWithJacobian>(da_dr2, da_dv2);
+    
+    std::vector<std::shared_ptr<IForce>> forces = {force1, force2};
+    PointMassDynamics dynamics(forces);
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(4.0, 5.0, 6.0)
+    );
+    
+    Eigen::MatrixXd F = dynamics.compute_jacobian(0.0, state);
+    
+    // Jacobians should sum
+    Eigen::Matrix3d expected_da_dr = da_dr1 + da_dr2;
+    Eigen::Matrix3d expected_da_dv = da_dv1 + da_dv2;
+    
+    EXPECT_TRUE((F.block<3,3>(3, 0).isApprox(expected_da_dr)));
+    EXPECT_TRUE((F.block<3,3>(3, 3).isApprox(expected_da_dv)));
+}
+
+TEST_F(PointMassDynamicsTest, JacobianNumericalValidation) {
+    // Test Jacobian against numerical differentiation
+    Eigen::Matrix3d da_dr;
+    da_dr << -1.0, 0.5, 0.0,
+             0.5, -2.0, 0.0,
+             0.0, 0.0, -3.0;
+    
+    Eigen::Matrix3d da_dv;
+    da_dv << -0.1, 0.0, 0.0,
+             0.0, -0.2, 0.0,
+             0.0, 0.0, -0.3;
+    
+    auto force = std::make_shared<LinearForceWithJacobian>(da_dr, da_dv);
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{force});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(4.0, 5.0, 6.0)
+    );
+    
+    // Analytical Jacobian
+    Eigen::MatrixXd F = dynamics.compute_jacobian(0.0, state);
+    
+    // Numerical Jacobian
+    double epsilon = 1e-6;
+    Eigen::MatrixXd F_numerical = Eigen::MatrixXd::Zero(6, 6);
+    
+    for (int i = 0; i < 6; ++i) {
+        Eigen::VectorXd state_plus = state;
+        Eigen::VectorXd state_minus = state;
+        
+        state_plus(i) += epsilon;
+        state_minus(i) -= epsilon;
+        
+        Eigen::VectorXd deriv_plus = dynamics.compute_dynamics(0.0, state_plus);
+        Eigen::VectorXd deriv_minus = dynamics.compute_dynamics(0.0, state_minus);
+        
+        F_numerical.col(i) = (deriv_plus - deriv_minus) / (2.0 * epsilon);
+    }
+    
+    // Compare
+    EXPECT_TRUE(F.isApprox(F_numerical, 1e-5));
+}
+
+TEST_F(PointMassDynamicsTest, JacobianStateIndependent) {
+    // For linear forces, Jacobian should not depend on state
+    Eigen::Matrix3d da_dr = Eigen::Matrix3d::Identity() * 2.0;
+    Eigen::Matrix3d da_dv = Eigen::Matrix3d::Identity() * -0.5;
+    
+    auto force = std::make_shared<LinearForceWithJacobian>(da_dr, da_dv);
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{force});
+    
+    Eigen::VectorXd state1 = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(4.0, 5.0, 6.0)
+    );
+    
+    Eigen::VectorXd state2 = createState(
+        Eigen::Vector3d(10.0, 20.0, 30.0),
+        Eigen::Vector3d(40.0, 50.0, 60.0)
+    );
+    
+    Eigen::MatrixXd F1 = dynamics.compute_jacobian(0.0, state1);
+    Eigen::MatrixXd F2 = dynamics.compute_jacobian(0.0, state2);
+    
+    // Should be identical for linear forces
+    EXPECT_TRUE(F1.isApprox(F2));
+}
+
+TEST_F(PointMassDynamicsTest, JacobianTimeIndependent) {
+    // Jacobian should not depend on time for time-independent forces
+    Eigen::Matrix3d da_dr = Eigen::Matrix3d::Identity() * 2.0;
+    Eigen::Matrix3d da_dv = Eigen::Matrix3d::Identity() * -0.5;
+    
+    auto force = std::make_shared<LinearForceWithJacobian>(da_dr, da_dv);
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{force});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(4.0, 5.0, 6.0)
+    );
+    
+    Eigen::MatrixXd F1 = dynamics.compute_jacobian(0.0, state);
+    Eigen::MatrixXd F2 = dynamics.compute_jacobian(100.0, state);
+    
+    EXPECT_TRUE(F1.isApprox(F2));
+}
+
+TEST_F(PointMassDynamicsTest, JacobianUpperLeftAlwaysZero) {
+    // ∂ṙ/∂r should always be zero (position rate doesn't depend on position)
+    Eigen::Matrix3d da_dr = Eigen::Matrix3d::Random();
+    Eigen::Matrix3d da_dv = Eigen::Matrix3d::Random();
+    
+    auto force = std::make_shared<LinearForceWithJacobian>(da_dr, da_dv);
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{force});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(4.0, 5.0, 6.0)
+    );
+    
+    Eigen::MatrixXd F = dynamics.compute_jacobian(0.0, state);
+    
+    EXPECT_TRUE((F.block<3,3>(0, 0).isZero()));
+}
+
+TEST_F(PointMassDynamicsTest, JacobianLinearConsistency) {
+    // For linear dynamics, Taylor expansion should be exact
+    Eigen::Matrix3d da_dr;
+    da_dr << -1.0, 0.5, 0.0,
+             0.5, -2.0, 0.0,
+             0.0, 0.0, -3.0;
+    
+    Eigen::Matrix3d da_dv;
+    da_dv << -0.1, 0.0, 0.0,
+             0.0, -0.2, 0.0,
+             0.0, 0.0, -0.3;
+    
+    auto force = std::make_shared<LinearForceWithJacobian>(da_dr, da_dv);
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{force});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(4.0, 5.0, 6.0)
+    );
+    
+    Eigen::MatrixXd F = dynamics.compute_jacobian(0.0, state);
+    
+    // Perturb state
+    Eigen::VectorXd delta_state = Eigen::VectorXd::Random(6) * 0.1;
+    Eigen::VectorXd state_perturbed = state + delta_state;
+    
+    // Compute derivatives
+    Eigen::VectorXd deriv_base = dynamics.compute_dynamics(0.0, state);
+    Eigen::VectorXd deriv_perturbed = dynamics.compute_dynamics(0.0, state_perturbed);
+    
+    // Taylor expansion: f(x + δx) ≈ f(x) + F·δx
+    Eigen::VectorXd deriv_linear = deriv_base + F * delta_state;
+    
+    // For linear dynamics, should be exact
+    EXPECT_TRUE(deriv_perturbed.isApprox(deriv_linear, 1e-10));
+}
+
+TEST_F(PointMassDynamicsTest, JacobianBlockStructure) {
+    // Verify the 4-block structure of the Jacobian
+    Eigen::Matrix3d da_dr;
+    da_dr << 1.0, 2.0, 3.0,
+             4.0, 5.0, 6.0,
+             7.0, 8.0, 9.0;
+    
+    Eigen::Matrix3d da_dv;
+    da_dv << -1.0, -2.0, -3.0,
+             -4.0, -5.0, -6.0,
+             -7.0, -8.0, -9.0;
+    
+    auto force = std::make_shared<LinearForceWithJacobian>(da_dr, da_dv);
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{force});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(4.0, 5.0, 6.0)
+    );
+    
+    Eigen::MatrixXd F = dynamics.compute_jacobian(0.0, state);
+    
+    // Expected structure:
+    // F = [ 0      I    ]
+    //     [ da_dr da_dv ]
+    
+    Eigen::MatrixXd expected = Eigen::MatrixXd::Zero(6, 6);
+    expected.block<3,3>(0, 3) = Eigen::Matrix3d::Identity();
+    expected.block<3,3>(3, 0) = da_dr;
+    expected.block<3,3>(3, 3) = da_dv;
+    
+    EXPECT_TRUE(F.isApprox(expected));
+}
+
+TEST_F(PointMassDynamicsTest, JacobianZeroForces) {
+    // With no forces, only kinematic coupling remains
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(4.0, 5.0, 6.0)
+    );
+    
+    Eigen::MatrixXd F = dynamics.compute_jacobian(0.0, state);
+    
+    // Expected: only upper-right block is non-zero (identity)
+    Eigen::MatrixXd expected = Eigen::MatrixXd::Zero(6, 6);
+    expected.block<3,3>(0, 3) = Eigen::Matrix3d::Identity();
+    
+    EXPECT_TRUE(F.isApprox(expected));
+}
+
+TEST_F(PointMassDynamicsTest, JacobianManyForces) {
+    // Test Jacobian with multiple forces
+    std::vector<std::shared_ptr<IForce>> forces;
+    Eigen::Matrix3d total_da_dr = Eigen::Matrix3d::Zero();
+    Eigen::Matrix3d total_da_dv = Eigen::Matrix3d::Zero();
+    
+    for (int i = 0; i < 5; ++i) {
+        Eigen::Matrix3d da_dr = Eigen::Matrix3d::Identity() * (i + 1);
+        Eigen::Matrix3d da_dv = Eigen::Matrix3d::Identity() * -(i + 1) * 0.1;
+        
+        forces.push_back(std::make_shared<LinearForceWithJacobian>(da_dr, da_dv));
+        total_da_dr += da_dr;
+        total_da_dv += da_dv;
+    }
+    
+    PointMassDynamics dynamics(forces);
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(4.0, 5.0, 6.0)
+    );
+    
+    Eigen::MatrixXd F = dynamics.compute_jacobian(0.0, state);
+    
+    // Check that Jacobians sum correctly
+    EXPECT_TRUE((F.block<3,3>(3, 0).isApprox(total_da_dr)));
+    EXPECT_TRUE((F.block<3,3>(3, 3).isApprox(total_da_dv)));
+}
+
+TEST_F(PointMassDynamicsTest, JacobianLargeValues) {
+    // Test with large Jacobian values
+    Eigen::Matrix3d da_dr = Eigen::Matrix3d::Identity() * 1e10;
+    Eigen::Matrix3d da_dv = Eigen::Matrix3d::Identity() * -1e8;
+    
+    auto force = std::make_shared<LinearForceWithJacobian>(da_dr, da_dv);
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{force});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1e6, 2e6, 3e6),
+        Eigen::Vector3d(1e3, 2e3, 3e3)
+    );
+    
+    Eigen::MatrixXd F = dynamics.compute_jacobian(0.0, state);
+    
+    EXPECT_TRUE((F.block<3,3>(3, 0).isApprox(da_dr)));
+    EXPECT_TRUE((F.block<3,3>(3, 3).isApprox(da_dv)));
+}
+
+TEST_F(PointMassDynamicsTest, JacobianSmallValues) {
+    // Test with small Jacobian values
+    Eigen::Matrix3d da_dr = Eigen::Matrix3d::Identity() * 1e-10;
+    Eigen::Matrix3d da_dv = Eigen::Matrix3d::Identity() * -1e-12;
+    
+    auto force = std::make_shared<LinearForceWithJacobian>(da_dr, da_dv);
+    PointMassDynamics dynamics(std::vector<std::shared_ptr<IForce>>{force});
+    
+    Eigen::VectorXd state = createState(
+        Eigen::Vector3d(1e-6, 2e-6, 3e-6),
+        Eigen::Vector3d(1e-3, 2e-3, 3e-3)
+    );
+    
+    Eigen::MatrixXd F = dynamics.compute_jacobian(0.0, state);
+    
+    EXPECT_TRUE((F.block<3,3>(3, 0).isApprox(da_dr)));
+    EXPECT_TRUE((F.block<3,3>(3, 3).isApprox(da_dv)));
+}

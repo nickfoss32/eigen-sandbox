@@ -331,3 +331,371 @@ TEST_F(FictitiousForcesTest, HighAngularVelocity) {
     // Forces should be significant
     EXPECT_GT(acceleration.norm(), 1.0);
 }
+
+// Add these tests after the existing tests:
+
+// ============================================================================
+// JACOBIAN TESTS
+// ============================================================================
+
+TEST_F(FictitiousForcesTest, JacobianPositionDerivative) {
+    FictitiousForces forces(earth_omega_);
+    
+    ForceContext ctx;
+    ctx.t = 0.0;
+    ctx.position << 6.378e6, 1e6, 2e6;
+    ctx.velocity << 100.0, 200.0, 300.0;
+    
+    // Get analytical Jacobian
+    auto [da_dr, da_dv] = forces.compute_jacobian(ctx);
+    
+    // Numerical Jacobian for position
+    double epsilon = 1e-4;  // Larger epsilon for finite differences
+    Eigen::Matrix3d da_dr_numerical;
+    
+    for (int i = 0; i < 3; ++i) {
+        ForceContext ctx_plus = ctx;
+        ForceContext ctx_minus = ctx;
+        
+        ctx_plus.position(i) += epsilon;
+        ctx_minus.position(i) -= epsilon;
+        
+        Eigen::Vector3d a_plus = forces.compute_force(ctx_plus);
+        Eigen::Vector3d a_minus = forces.compute_force(ctx_minus);
+        
+        da_dr_numerical.col(i) = (a_plus - a_minus) / (2.0 * epsilon);
+    }
+    
+    // Compare
+    double error = (da_dr - da_dr_numerical).norm();
+    EXPECT_LT(error, 1e-6) << "Position Jacobian error: " << error;
+}
+
+TEST_F(FictitiousForcesTest, JacobianVelocityDerivative) {
+    FictitiousForces forces(earth_omega_);
+    
+    ForceContext ctx;
+    ctx.t = 0.0;
+    ctx.position << 6.378e6, 1e6, 2e6;
+    ctx.velocity << 100.0, 200.0, 300.0;
+    
+    // Get analytical Jacobian
+    auto [da_dr, da_dv] = forces.compute_jacobian(ctx);
+    
+    // Numerical Jacobian for velocity
+    double epsilon = 1e-4;
+    Eigen::Matrix3d da_dv_numerical;
+    
+    for (int i = 0; i < 3; ++i) {
+        ForceContext ctx_plus = ctx;
+        ForceContext ctx_minus = ctx;
+        
+        ctx_plus.velocity(i) += epsilon;
+        ctx_minus.velocity(i) -= epsilon;
+        
+        Eigen::Vector3d a_plus = forces.compute_force(ctx_plus);
+        Eigen::Vector3d a_minus = forces.compute_force(ctx_minus);
+        
+        da_dv_numerical.col(i) = (a_plus - a_minus) / (2.0 * epsilon);
+    }
+    
+    // Compare
+    double error = (da_dv - da_dv_numerical).norm();
+    EXPECT_LT(error, 1e-6) << "Velocity Jacobian error: " << error;
+}
+
+TEST_F(FictitiousForcesTest, JacobianPositionStructure) {
+    FictitiousForces forces(earth_omega_);
+    
+    ForceContext ctx;
+    ctx.t = 0.0;
+    ctx.position << 1e6, 2e6, 3e6;
+    ctx.velocity << 100.0, 200.0, 300.0;
+    
+    auto [da_dr, da_dv] = forces.compute_jacobian(ctx);
+    
+    // ∂a/∂r = -ω×(ω×I) = -[ω×]²
+    // For ω = [0, 0, w]:
+    // [ω×] = [0  -w  0]
+    //        [w   0  0]
+    //        [0   0  0]
+    //
+    // [ω×]² = [-w²  0  0]
+    //         [ 0 -w²  0]
+    //         [ 0   0  0]
+    //
+    // So ∂a/∂r = [w²  0  0]
+    //            [ 0 w²  0]
+    //            [ 0  0  0]
+    
+    double w = EARTH_OMEGA;
+    double w2 = w * w;
+    
+    EXPECT_NEAR(da_dr(0, 0), w2, 1e-15);
+    EXPECT_NEAR(da_dr(1, 1), w2, 1e-15);
+    EXPECT_NEAR(da_dr(2, 2), 0.0, 1e-15);
+    
+    // Off-diagonal should be zero for z-axis rotation
+    EXPECT_NEAR(da_dr(0, 1), 0.0, 1e-15);
+    EXPECT_NEAR(da_dr(0, 2), 0.0, 1e-15);
+    EXPECT_NEAR(da_dr(1, 0), 0.0, 1e-15);
+    EXPECT_NEAR(da_dr(1, 2), 0.0, 1e-15);
+    EXPECT_NEAR(da_dr(2, 0), 0.0, 1e-15);
+    EXPECT_NEAR(da_dr(2, 1), 0.0, 1e-15);
+}
+
+TEST_F(FictitiousForcesTest, JacobianVelocityStructure) {
+    FictitiousForces forces(earth_omega_);
+    
+    ForceContext ctx;
+    ctx.t = 0.0;
+    ctx.position << 1e6, 2e6, 3e6;
+    ctx.velocity << 100.0, 200.0, 300.0;
+    
+    auto [da_dr, da_dv] = forces.compute_jacobian(ctx);
+    
+    // ∂a/∂v = -2[ω×]
+    // For ω = [0, 0, w]:
+    // -2[ω×] = [ 0  2w  0]
+    //          [-2w  0  0]
+    //          [ 0   0  0]
+    
+    double w = EARTH_OMEGA;
+    
+    EXPECT_NEAR(da_dv(0, 0), 0.0, 1e-15);
+    EXPECT_NEAR(da_dv(0, 1), 2.0 * w, 1e-15);
+    EXPECT_NEAR(da_dv(0, 2), 0.0, 1e-15);
+    
+    EXPECT_NEAR(da_dv(1, 0), -2.0 * w, 1e-15);
+    EXPECT_NEAR(da_dv(1, 1), 0.0, 1e-15);
+    EXPECT_NEAR(da_dv(1, 2), 0.0, 1e-15);
+    
+    EXPECT_NEAR(da_dv(2, 0), 0.0, 1e-15);
+    EXPECT_NEAR(da_dv(2, 1), 0.0, 1e-15);
+    EXPECT_NEAR(da_dv(2, 2), 0.0, 1e-15);
+}
+
+TEST_F(FictitiousForcesTest, JacobianSkewSymmetricVelocity) {
+    FictitiousForces forces(earth_omega_);
+    
+    ForceContext ctx;
+    ctx.t = 0.0;
+    ctx.position << 1e6, 2e6, 3e6;
+    ctx.velocity << 100.0, 200.0, 300.0;
+    
+    auto [da_dr, da_dv] = forces.compute_jacobian(ctx);
+    
+    // ∂a/∂v = -2[ω×] should be skew-symmetric
+    Eigen::Matrix3d da_dv_transpose = da_dv.transpose();
+    
+    EXPECT_NEAR((da_dv + da_dv_transpose).norm(), 0.0, 1e-14)
+        << "Velocity Jacobian should be skew-symmetric";
+}
+
+TEST_F(FictitiousForcesTest, JacobianSymmetricPosition) {
+    FictitiousForces forces(earth_omega_);
+    
+    ForceContext ctx;
+    ctx.t = 0.0;
+    ctx.position << 1e6, 2e6, 3e6;
+    ctx.velocity << 100.0, 200.0, 300.0;
+    
+    auto [da_dr, da_dv] = forces.compute_jacobian(ctx);
+    
+    // ∂a/∂r = -[ω×]² should be symmetric
+    Eigen::Matrix3d da_dr_transpose = da_dr.transpose();
+    
+    EXPECT_NEAR((da_dr - da_dr_transpose).norm(), 0.0, 1e-14)
+        << "Position Jacobian should be symmetric";
+}
+
+TEST_F(FictitiousForcesTest, JacobianCustomOmega) {
+    Eigen::Vector3d custom_omega(1.0, 2.0, 3.0);
+    FictitiousForces forces(custom_omega);
+    
+    ForceContext ctx;
+    ctx.t = 0.0;
+    ctx.position << 100.0, 200.0, 300.0;
+    ctx.velocity << 10.0, 20.0, 30.0;
+    
+    // Get analytical Jacobian
+    auto [da_dr, da_dv] = forces.compute_jacobian(ctx);
+    
+    // Numerical verification
+    double epsilon = 1e-6;
+    
+    // Check position Jacobian
+    Eigen::Matrix3d da_dr_numerical;
+    for (int i = 0; i < 3; ++i) {
+        ForceContext ctx_plus = ctx;
+        ForceContext ctx_minus = ctx;
+        
+        ctx_plus.position(i) += epsilon;
+        ctx_minus.position(i) -= epsilon;
+        
+        Eigen::Vector3d a_plus = forces.compute_force(ctx_plus);
+        Eigen::Vector3d a_minus = forces.compute_force(ctx_minus);
+        
+        da_dr_numerical.col(i) = (a_plus - a_minus) / (2.0 * epsilon);
+    }
+    
+    EXPECT_LT((da_dr - da_dr_numerical).norm(), 1e-5);
+    
+    // Check velocity Jacobian
+    Eigen::Matrix3d da_dv_numerical;
+    for (int i = 0; i < 3; ++i) {
+        ForceContext ctx_plus = ctx;
+        ForceContext ctx_minus = ctx;
+        
+        ctx_plus.velocity(i) += epsilon;
+        ctx_minus.velocity(i) -= epsilon;
+        
+        Eigen::Vector3d a_plus = forces.compute_force(ctx_plus);
+        Eigen::Vector3d a_minus = forces.compute_force(ctx_minus);
+        
+        da_dv_numerical.col(i) = (a_plus - a_minus) / (2.0 * epsilon);
+    }
+    
+    EXPECT_LT((da_dv - da_dv_numerical).norm(), 1e-5);
+}
+
+TEST_F(FictitiousForcesTest, JacobianZeroOmega) {
+    Eigen::Vector3d zero_omega = Eigen::Vector3d::Zero();
+    FictitiousForces forces(zero_omega);
+    
+    ForceContext ctx;
+    ctx.t = 0.0;
+    ctx.position << 1e6, 2e6, 3e6;
+    ctx.velocity << 100.0, 200.0, 300.0;
+    
+    auto [da_dr, da_dv] = forces.compute_jacobian(ctx);
+    
+    // With no rotation, all Jacobians should be zero
+    EXPECT_DOUBLE_EQ(da_dr.norm(), 0.0);
+    EXPECT_DOUBLE_EQ(da_dv.norm(), 0.0);
+}
+
+TEST_F(FictitiousForcesTest, JacobianStateIndependent) {
+    FictitiousForces forces(earth_omega_);
+    
+    // Test that Jacobians don't depend on state values (linear transformation)
+    ForceContext ctx1, ctx2;
+    ctx1.t = 0.0;
+    ctx1.position << 1e6, 2e6, 3e6;
+    ctx1.velocity << 100.0, 200.0, 300.0;
+    
+    ctx2.t = 0.0;
+    ctx2.position << 5e6, -1e6, 0.5e6;
+    ctx2.velocity << -50.0, 100.0, 25.0;
+    
+    auto [da_dr1, da_dv1] = forces.compute_jacobian(ctx1);
+    auto [da_dr2, da_dv2] = forces.compute_jacobian(ctx2);
+    
+    // Jacobians should be identical (linear transformations)
+    EXPECT_EQ(da_dr1, da_dr2);
+    EXPECT_EQ(da_dv1, da_dv2);
+}
+
+TEST_F(FictitiousForcesTest, JacobianLinearConsistency) {
+    FictitiousForces forces(earth_omega_);
+    
+    ForceContext ctx;
+    ctx.t = 0.0;
+    ctx.position << 1e6, 2e6, 3e6;
+    ctx.velocity << 100.0, 200.0, 300.0;
+    
+    auto [da_dr, da_dv] = forces.compute_jacobian(ctx);
+    
+    // Test linearity: a(r + dr, v + dv) ≈ a(r,v) + da_dr·dr + da_dv·dv
+    Eigen::Vector3d dr(100.0, -50.0, 25.0);
+    Eigen::Vector3d dv(1.0, 2.0, -0.5);
+    
+    ForceContext ctx_perturbed = ctx;
+    ctx_perturbed.position += dr;
+    ctx_perturbed.velocity += dv;
+    
+    Eigen::Vector3d a_base = forces.compute_force(ctx);
+    Eigen::Vector3d a_perturbed = forces.compute_force(ctx_perturbed);
+    
+    Eigen::Vector3d a_linear = a_base + da_dr * dr + da_dv * dv;
+    
+    // For linear transformations, should be exact
+    EXPECT_LT((a_perturbed - a_linear).norm(), 1e-10);
+}
+
+TEST_F(FictitiousForcesTest, JacobianPositionNegativeSemidefinite) {
+    FictitiousForces forces(earth_omega_);
+    
+    ForceContext ctx;
+    ctx.t = 0.0;
+    ctx.position << 1e6, 2e6, 3e6;
+    ctx.velocity << 100.0, 200.0, 300.0;
+    
+    auto [da_dr, da_dv] = forces.compute_jacobian(ctx);
+    
+    // ∂a/∂r = -[ω×]² should be negative semi-definite
+    // (centrifugal force increases with distance from axis)
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigensolver(da_dr);
+    Eigen::Vector3d eigenvalues = eigensolver.eigenvalues();
+    
+    // All eigenvalues should be >= 0 (force points outward)
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_GE(eigenvalues(i), -1e-14) 
+            << "Eigenvalue " << i << " is negative: " << eigenvalues(i);
+    }
+}
+
+TEST_F(FictitiousForcesTest, JacobianHighAngularVelocity) {
+    Eigen::Vector3d fast_omega(0.0, 0.0, 10.0); // 10 rad/s
+    FictitiousForces forces(fast_omega);
+    
+    ForceContext ctx;
+    ctx.t = 0.0;
+    ctx.position << 10.0, 20.0, 30.0;
+    ctx.velocity << 1.0, 2.0, 3.0;
+    
+    // Get analytical Jacobian
+    auto [da_dr, da_dv] = forces.compute_jacobian(ctx);
+    
+    // Numerical verification with high omega
+    double epsilon = 1e-6;
+    Eigen::Matrix3d da_dr_numerical;
+    
+    for (int i = 0; i < 3; ++i) {
+        ForceContext ctx_plus = ctx;
+        ForceContext ctx_minus = ctx;
+        
+        ctx_plus.position(i) += epsilon;
+        ctx_minus.position(i) -= epsilon;
+        
+        Eigen::Vector3d a_plus = forces.compute_force(ctx_plus);
+        Eigen::Vector3d a_minus = forces.compute_force(ctx_minus);
+        
+        da_dr_numerical.col(i) = (a_plus - a_minus) / (2.0 * epsilon);
+    }
+    
+    EXPECT_LT((da_dr - da_dr_numerical).norm(), 1e-4);
+}
+
+TEST_F(FictitiousForcesTest, JacobianMagnitudeScaling) {
+    // Test that Jacobian magnitudes scale correctly with omega
+    Eigen::Vector3d omega1(0.0, 0.0, 1.0);
+    Eigen::Vector3d omega2(0.0, 0.0, 2.0);
+    
+    FictitiousForces forces1(omega1);
+    FictitiousForces forces2(omega2);
+    
+    ForceContext ctx;
+    ctx.t = 0.0;
+    ctx.position << 100.0, 200.0, 300.0;
+    ctx.velocity << 10.0, 20.0, 30.0;
+    
+    auto [da_dr1, da_dv1] = forces1.compute_jacobian(ctx);
+    auto [da_dr2, da_dv2] = forces2.compute_jacobian(ctx);
+    
+    // Position Jacobian should scale with omega²
+    EXPECT_NEAR(da_dr2.norm(), 4.0 * da_dr1.norm(), 1e-10);
+    
+    // Velocity Jacobian should scale linearly with omega
+    EXPECT_NEAR(da_dv2.norm(), 2.0 * da_dv1.norm(), 1e-10);
+}
