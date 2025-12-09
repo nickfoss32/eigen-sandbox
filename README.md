@@ -22,3 +22,36 @@ Propagate noisy track data to impact:
   
 Plot trajectory on the globe:  
 `python plot.py ../build/canaveral_launch_0az_20el_predicted_TLS.json`
+
+## Source Organization
+```
+// Data types (what things are)
+common::Measurement
+common::StateEstimate
+common::Trajectory
+
+// Sensor models (how sensors work)
+sensors::ISensorModel
+sensors::RadarSensorModel
+sensors::CameraSensorModel
+
+// Filters (how to estimate state)
+filtering::IKalmanFilter
+filtering::ExtendedKalmanFilter
+
+// Propagators (how state evolves)
+propagator::IPropagator
+propagator::NumericalPropagator
+
+// Dynamics (physics)
+dynamics::IDynamics
+dynamics::PointMassDynamics
+```
+
+Folder	Purpose	Contents	Examples
+common/	Shared data types	Structs, enums, constants	Measurement, StateEstimate, TrackQuality
+sensors/	Sensor models (h(x))	How sensors measure	RadarSensorModel, CameraSensorModel
+filtering/	State estimation	Kalman filters	ExtendedKalmanFilter, UKF
+propagator/	State propagation (f(x))	How states evolve	NumericalPropagator, AnalyticalPropagator
+dynamics/	Physical dynamics	Forces, accelerations	PointMassDynamics, Gravity
+tracking/	Multi-target tracking	Track management	Tracker, DataAssociation

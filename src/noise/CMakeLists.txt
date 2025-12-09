@@ -6,5 +6,5 @@ add_library(noise
     gaussian_noise.cpp
 )
 add_library(tracking::noise ALIAS noise)
-target_include_directories(noise PRIVATE ${CMAKE_SOURCE_DIR}/include/noise)
+target_include_directories(noise PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(noise PUBLIC Eigen3::Eigen)

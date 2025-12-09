@@ -7,8 +7,5 @@ add_library(fitting
     plane_fit.cpp
 )
 add_library(tracking::fitting ALIAS fitting)
-target_include_directories(fitting 
-    PUBLIC 
-        ${CMAKE_SOURCE_DIR}/include/fitting
-)
+target_include_directories(fitting PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(fitting PUBLIC Eigen3::Eigen)

@@ -1,4 +1,4 @@
-#include "gaussian_noise.hpp"
+#include "noise/gaussian_noise.hpp"
 
 namespace noise {
 GaussianNoise::GaussianNoise(double sigma_pos, double sigma_vel) 

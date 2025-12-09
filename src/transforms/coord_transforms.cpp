@@ -1,10 +1,10 @@
-#include <fstream>
-#include <sstream>
-#include <stdexcept>
+#include "transforms/coord_transforms.hpp"
 
 #include <sofa.h>
 
-#include "coord_transforms.hpp"
+#include <fstream>
+#include <sstream>
+#include <stdexcept>
 
 namespace transforms {
 EopParser::EopParser(const std::string& filename) {

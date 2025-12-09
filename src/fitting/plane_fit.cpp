@@ -1,4 +1,4 @@
-#include "plane_fit.hpp"
+#include "fitting/plane_fit.hpp"
 
 namespace fitting {
 PlaneFitter::PlaneFitter(bool fitThroughOrigin)

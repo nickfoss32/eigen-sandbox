@@ -9,6 +9,7 @@
 /// using the SOFA library.
 
 #include <Eigen/Dense>
+
 #include <vector>
 #include <string>
 

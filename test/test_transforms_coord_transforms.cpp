@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
+
+#include "transforms/coord_transforms.hpp"
+
 #include <Eigen/Dense>
-#include <transforms/coord_transforms.hpp>
 
 // Test 3-state (position only) ECEF to ECI and back
 TEST(CoordTransformsTest, ECEFtoECIAndBack_3State) {
