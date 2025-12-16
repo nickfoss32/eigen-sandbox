@@ -31,7 +31,7 @@ TEST_F(FictitiousForcesTest, ZeroVelocityZeroCoriolis) {
     ctx.position << 6.378e6, 0.0, 0.0; // On equator
     ctx.velocity << 0.0, 0.0, 0.0;     // Zero velocity
     
-    Eigen::Vector3d acceleration = forces.compute_force(ctx);
+    Eigen::Vector3d acceleration = forces.compute_acceleration(ctx);
     
     // Coriolis should be zero, only centrifugal remains
     // Centrifugal: -omega x (omega x r)
@@ -49,7 +49,7 @@ TEST_F(FictitiousForcesTest, OriginZeroCentrifugal) {
     ctx.position << 0.0, 0.0, 0.0;     // At origin
     ctx.velocity << 100.0, 100.0, 0.0; // Some velocity
     
-    Eigen::Vector3d acceleration = forces.compute_force(ctx);
+    Eigen::Vector3d acceleration = forces.compute_acceleration(ctx);
     
     // Centrifugal should be zero, only Coriolis remains
     // Coriolis: -2 * omega x v
@@ -69,7 +69,7 @@ TEST_F(FictitiousForcesTest, CoriolisForce) {
     ctx.position << 0.0, 0.0, 0.0;     // At origin to isolate Coriolis
     ctx.velocity << 100.0, 0.0, 0.0;   // Eastward velocity
     
-    Eigen::Vector3d acceleration = forces.compute_force(ctx);
+    Eigen::Vector3d acceleration = forces.compute_acceleration(ctx);
     
     // Coriolis: -2 * omega x v
     // omega = [0, 0, w], v = [100, 0, 0]
@@ -90,7 +90,7 @@ TEST_F(FictitiousForcesTest, CentrifugalForce) {
     ctx.position << 6.378e6, 0.0, 0.0; // On equator, 1 Earth radius
     ctx.velocity << 0.0, 0.0, 0.0;     // Zero velocity to isolate centrifugal
     
-    Eigen::Vector3d acceleration = forces.compute_force(ctx);
+    Eigen::Vector3d acceleration = forces.compute_acceleration(ctx);
     
     // Centrifugal: -omega x (omega x r)
     // omega = [0, 0, w], r = [r, 0, 0]
@@ -113,7 +113,7 @@ TEST_F(FictitiousForcesTest, CombinedForces) {
     ctx.position << 6.378e6, 0.0, 0.0;
     ctx.velocity << 0.0, 100.0, 0.0;   // Northward velocity
     
-    Eigen::Vector3d acceleration = forces.compute_force(ctx);
+    Eigen::Vector3d acceleration = forces.compute_acceleration(ctx);
     
     // Both forces should be present
     Eigen::Vector3d coriolis = -2.0 * earth_omega_.cross(ctx.velocity);
@@ -134,7 +134,7 @@ TEST_F(FictitiousForcesTest, CoriolisPerpendicularToVelocity) {
     ctx.position << 0.0, 0.0, 0.0;
     ctx.velocity << 100.0, 50.0, 25.0;
     
-    Eigen::Vector3d acceleration = forces.compute_force(ctx);
+    Eigen::Vector3d acceleration = forces.compute_acceleration(ctx);
     
     // Coriolis force should be perpendicular to velocity
     double dot_product = acceleration.dot(ctx.velocity);
@@ -151,7 +151,7 @@ TEST_F(FictitiousForcesTest, CustomAngularVelocity) {
     ctx.position << 1.0, 2.0, 3.0;
     ctx.velocity << 4.0, 5.0, 6.0;
     
-    Eigen::Vector3d acceleration = forces.compute_force(ctx);
+    Eigen::Vector3d acceleration = forces.compute_acceleration(ctx);
     
     // Calculate expected
     Eigen::Vector3d coriolis = -2.0 * custom_omega.cross(ctx.velocity);
@@ -173,7 +173,7 @@ TEST_F(FictitiousForcesTest, ZeroAngularVelocity) {
     ctx.position << 1000.0, 2000.0, 3000.0;
     ctx.velocity << 100.0, 200.0, 300.0;
     
-    Eigen::Vector3d acceleration = forces.compute_force(ctx);
+    Eigen::Vector3d acceleration = forces.compute_acceleration(ctx);
     
     // No rotation = no fictitious forces
     EXPECT_DOUBLE_EQ(acceleration(0), 0.0);
@@ -191,11 +191,11 @@ TEST_F(FictitiousForcesTest, CoriolisScalesWithVelocity) {
     
     // Test with velocity v
     ctx.velocity << 100.0, 0.0, 0.0;
-    Eigen::Vector3d acc1 = forces.compute_force(ctx);
+    Eigen::Vector3d acc1 = forces.compute_acceleration(ctx);
     
     // Test with velocity 2v
     ctx.velocity << 200.0, 0.0, 0.0;
-    Eigen::Vector3d acc2 = forces.compute_force(ctx);
+    Eigen::Vector3d acc2 = forces.compute_acceleration(ctx);
     
     // Acceleration should double
     EXPECT_NEAR(acc2.norm(), 2.0 * acc1.norm(), 1e-10);
@@ -211,11 +211,11 @@ TEST_F(FictitiousForcesTest, CentrifugalScalesWithPosition) {
     
     // Test at radius r
     ctx.position << 1e6, 0.0, 0.0;
-    Eigen::Vector3d acc1 = forces.compute_force(ctx);
+    Eigen::Vector3d acc1 = forces.compute_acceleration(ctx);
     
     // Test at radius 2r
     ctx.position << 2e6, 0.0, 0.0;
-    Eigen::Vector3d acc2 = forces.compute_force(ctx);
+    Eigen::Vector3d acc2 = forces.compute_acceleration(ctx);
     
     // Acceleration should double
     EXPECT_NEAR(acc2.norm(), 2.0 * acc1.norm(), 1e-10);
@@ -231,11 +231,11 @@ TEST_F(FictitiousForcesTest, CoriolisDirectionReversal) {
     
     // Test with +velocity
     ctx.velocity << 100.0, 0.0, 0.0;
-    Eigen::Vector3d acc_pos = forces.compute_force(ctx);
+    Eigen::Vector3d acc_pos = forces.compute_acceleration(ctx);
     
     // Test with -velocity
     ctx.velocity << -100.0, 0.0, 0.0;
-    Eigen::Vector3d acc_neg = forces.compute_force(ctx);
+    Eigen::Vector3d acc_neg = forces.compute_acceleration(ctx);
     
     // Accelerations should be opposite
     EXPECT_NEAR(acc_pos(0), -acc_neg(0), 1e-10);
@@ -261,7 +261,7 @@ TEST_F(FictitiousForcesTest, CentrifugalOutward) {
     
     for (const auto& pos : positions) {
         ctx.position = pos;
-        Eigen::Vector3d acc = forces.compute_force(ctx);
+        Eigen::Vector3d acc = forces.compute_acceleration(ctx);
         
         // Centrifugal should point away from rotation axis
         // For z-axis rotation, this is in xy-plane
@@ -287,13 +287,13 @@ TEST_F(FictitiousForcesTest, TimeIndependent) {
     
     // Test at different times
     ctx.t = 0.0;
-    Eigen::Vector3d acc1 = forces.compute_force(ctx);
+    Eigen::Vector3d acc1 = forces.compute_acceleration(ctx);
     
     ctx.t = 100.0;
-    Eigen::Vector3d acc2 = forces.compute_force(ctx);
+    Eigen::Vector3d acc2 = forces.compute_acceleration(ctx);
     
     ctx.t = -50.0;
-    Eigen::Vector3d acc3 = forces.compute_force(ctx);
+    Eigen::Vector3d acc3 = forces.compute_acceleration(ctx);
     
     // Fictitious forces don't depend on time
     EXPECT_EQ(acc1, acc2);
@@ -309,7 +309,7 @@ TEST_F(FictitiousForcesTest, EarthSurfaceTypicalValues) {
     ctx.position << 6.378e6, 0.0, 0.0; // Earth radius
     ctx.velocity << 0.0, 100.0, 0.0;   // 100 m/s northward
     
-    Eigen::Vector3d acceleration = forces.compute_force(ctx);
+    Eigen::Vector3d acceleration = forces.compute_acceleration(ctx);
     
     // Magnitude should be small compared to gravity (~0.03 m/s^2)
     EXPECT_LT(acceleration.norm(), 1.0);
@@ -326,7 +326,7 @@ TEST_F(FictitiousForcesTest, HighAngularVelocity) {
     ctx.position << 1.0, 0.0, 0.0;
     ctx.velocity << 0.0, 1.0, 0.0;
     
-    Eigen::Vector3d acceleration = forces.compute_force(ctx);
+    Eigen::Vector3d acceleration = forces.compute_acceleration(ctx);
     
     // Forces should be significant
     EXPECT_GT(acceleration.norm(), 1.0);
@@ -360,8 +360,8 @@ TEST_F(FictitiousForcesTest, JacobianPositionDerivative) {
         ctx_plus.position(i) += epsilon;
         ctx_minus.position(i) -= epsilon;
         
-        Eigen::Vector3d a_plus = forces.compute_force(ctx_plus);
-        Eigen::Vector3d a_minus = forces.compute_force(ctx_minus);
+        Eigen::Vector3d a_plus = forces.compute_acceleration(ctx_plus);
+        Eigen::Vector3d a_minus = forces.compute_acceleration(ctx_minus);
         
         da_dr_numerical.col(i) = (a_plus - a_minus) / (2.0 * epsilon);
     }
@@ -393,8 +393,8 @@ TEST_F(FictitiousForcesTest, JacobianVelocityDerivative) {
         ctx_plus.velocity(i) += epsilon;
         ctx_minus.velocity(i) -= epsilon;
         
-        Eigen::Vector3d a_plus = forces.compute_force(ctx_plus);
-        Eigen::Vector3d a_minus = forces.compute_force(ctx_minus);
+        Eigen::Vector3d a_plus = forces.compute_acceleration(ctx_plus);
+        Eigen::Vector3d a_minus = forces.compute_acceleration(ctx_minus);
         
         da_dv_numerical.col(i) = (a_plus - a_minus) / (2.0 * epsilon);
     }
@@ -533,8 +533,8 @@ TEST_F(FictitiousForcesTest, JacobianCustomOmega) {
         ctx_plus.position(i) += epsilon;
         ctx_minus.position(i) -= epsilon;
         
-        Eigen::Vector3d a_plus = forces.compute_force(ctx_plus);
-        Eigen::Vector3d a_minus = forces.compute_force(ctx_minus);
+        Eigen::Vector3d a_plus = forces.compute_acceleration(ctx_plus);
+        Eigen::Vector3d a_minus = forces.compute_acceleration(ctx_minus);
         
         da_dr_numerical.col(i) = (a_plus - a_minus) / (2.0 * epsilon);
     }
@@ -550,8 +550,8 @@ TEST_F(FictitiousForcesTest, JacobianCustomOmega) {
         ctx_plus.velocity(i) += epsilon;
         ctx_minus.velocity(i) -= epsilon;
         
-        Eigen::Vector3d a_plus = forces.compute_force(ctx_plus);
-        Eigen::Vector3d a_minus = forces.compute_force(ctx_minus);
+        Eigen::Vector3d a_plus = forces.compute_acceleration(ctx_plus);
+        Eigen::Vector3d a_minus = forces.compute_acceleration(ctx_minus);
         
         da_dv_numerical.col(i) = (a_plus - a_minus) / (2.0 * epsilon);
     }
@@ -614,8 +614,8 @@ TEST_F(FictitiousForcesTest, JacobianLinearConsistency) {
     ctx_perturbed.position += dr;
     ctx_perturbed.velocity += dv;
     
-    Eigen::Vector3d a_base = forces.compute_force(ctx);
-    Eigen::Vector3d a_perturbed = forces.compute_force(ctx_perturbed);
+    Eigen::Vector3d a_base = forces.compute_acceleration(ctx);
+    Eigen::Vector3d a_perturbed = forces.compute_acceleration(ctx_perturbed);
     
     Eigen::Vector3d a_linear = a_base + da_dr * dr + da_dv * dv;
     
@@ -668,8 +668,8 @@ TEST_F(FictitiousForcesTest, JacobianHighAngularVelocity) {
         ctx_plus.position(i) += epsilon;
         ctx_minus.position(i) -= epsilon;
         
-        Eigen::Vector3d a_plus = forces.compute_force(ctx_plus);
-        Eigen::Vector3d a_minus = forces.compute_force(ctx_minus);
+        Eigen::Vector3d a_plus = forces.compute_acceleration(ctx_plus);
+        Eigen::Vector3d a_minus = forces.compute_acceleration(ctx_minus);
         
         da_dr_numerical.col(i) = (a_plus - a_minus) / (2.0 * epsilon);
     }

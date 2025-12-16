@@ -4,6 +4,7 @@ find_package(Eigen3 REQUIRED)
 
 add_library(dynamics
     aerodynamic_torque.cpp
+    atmospheric_drag.cpp
     fictitious_forces.cpp
     gravity.cpp
     gravity_gradient_torque.cpp

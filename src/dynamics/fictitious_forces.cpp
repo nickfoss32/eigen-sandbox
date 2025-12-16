@@ -6,7 +6,7 @@ FictitiousForces::FictitiousForces(const Eigen::Vector3d& omega)
 : omega_(omega)
 {}
 
-auto FictitiousForces::compute_force(const ForceContext& ctx) const -> Eigen::Vector3d {
+auto FictitiousForces::compute_acceleration(const ForceContext& ctx) const -> Eigen::Vector3d {
     // Coriolis acceleration: -2 * omega x v
     Eigen::Vector3d a_coriolis = -2.0 * omega_.cross(ctx.velocity);
 

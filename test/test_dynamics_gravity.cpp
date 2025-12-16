@@ -25,7 +25,7 @@ TEST_F(PointMassGravityTest, RadialAcceleration) {
     ctx.position << 7e6, 0.0, 0.0;  // 7000 km on x-axis
     ctx.velocity = Eigen::Vector3d::Zero();
     
-    Eigen::Vector3d a = gravity_.compute_force(ctx);
+    Eigen::Vector3d a = gravity_.compute_acceleration(ctx);
     double r = ctx.position.norm();
     double expected_mag = EARTH_MU / (r * r);
     
@@ -39,7 +39,7 @@ TEST_F(PointMassGravityTest, DirectionTowardCenter) {
     ctx.position << 1e6, 2e6, 3e6;
     ctx.velocity = Eigen::Vector3d::Zero();
     
-    Eigen::Vector3d a = gravity_.compute_force(ctx);
+    Eigen::Vector3d a = gravity_.compute_acceleration(ctx);
     Eigen::Vector3d r_hat = ctx.position.normalized();
     Eigen::Vector3d a_hat = a.normalized();
     
@@ -57,7 +57,7 @@ TEST_F(PointMassGravityTest, CircularOrbitVelocity) {
     ctx.position << r, 0.0, 0.0;
     ctx.velocity << 0.0, v_circular, 0.0;
     
-    Eigen::Vector3d a = gravity_.compute_force(ctx);
+    Eigen::Vector3d a = gravity_.compute_acceleration(ctx);
     
     // Centripetal acceleration = v²/r
     double expected = v_circular * v_circular / r;
@@ -75,8 +75,8 @@ TEST_F(PointMassGravityTest, InverseSquareLaw) {
     ctx2.position << 14e6, 0.0, 0.0;  // Double the radius
     ctx2.velocity = Eigen::Vector3d::Zero();
     
-    Eigen::Vector3d a1 = gravity_.compute_force(ctx1);
-    Eigen::Vector3d a2 = gravity_.compute_force(ctx2);
+    Eigen::Vector3d a1 = gravity_.compute_acceleration(ctx1);
+    Eigen::Vector3d a2 = gravity_.compute_acceleration(ctx2);
     
     EXPECT_NEAR(a2.norm(), a1.norm() / 4.0, 1e-6);
 }
@@ -92,8 +92,8 @@ TEST_F(PointMassGravityTest, VelocityIndependent) {
     ctx2.position = ctx1.position;
     ctx2.velocity << -500.0, 1000.0, -250.0;
     
-    Eigen::Vector3d a1 = gravity_.compute_force(ctx1);
-    Eigen::Vector3d a2 = gravity_.compute_force(ctx2);
+    Eigen::Vector3d a1 = gravity_.compute_acceleration(ctx1);
+    Eigen::Vector3d a2 = gravity_.compute_acceleration(ctx2);
     
     EXPECT_EQ(a1, a2);
 }
@@ -108,9 +108,9 @@ TEST_F(PointMassGravityTest, SphericalSymmetry) {
     ctx2.position << 0.0, r, 0.0;
     ctx3.position << 0.0, 0.0, r;
     
-    double a1_mag = gravity_.compute_force(ctx1).norm();
-    double a2_mag = gravity_.compute_force(ctx2).norm();
-    double a3_mag = gravity_.compute_force(ctx3).norm();
+    double a1_mag = gravity_.compute_acceleration(ctx1).norm();
+    double a2_mag = gravity_.compute_acceleration(ctx2).norm();
+    double a3_mag = gravity_.compute_acceleration(ctx3).norm();
     
     EXPECT_NEAR(a1_mag, a2_mag, 1e-10);
     EXPECT_NEAR(a2_mag, a3_mag, 1e-10);
@@ -123,7 +123,7 @@ TEST_F(PointMassGravityTest, NearSingularityHandling) {
     ctx.position << 0.5, 0.0, 0.0;  // Very close to origin
     ctx.velocity = Eigen::Vector3d::Zero();
     
-    Eigen::Vector3d a = gravity_.compute_force(ctx);
+    Eigen::Vector3d a = gravity_.compute_acceleration(ctx);
     
     // Should return some finite value, not NaN/Inf
     EXPECT_TRUE(std::isfinite(a.norm()));
@@ -152,8 +152,8 @@ TEST_F(PointMassGravityTest, JacobianPositionNumerical) {
         ctx_plus.position(i) += epsilon;
         ctx_minus.position(i) -= epsilon;
         
-        Eigen::Vector3d a_plus = gravity_.compute_force(ctx_plus);
-        Eigen::Vector3d a_minus = gravity_.compute_force(ctx_minus);
+        Eigen::Vector3d a_plus = gravity_.compute_acceleration(ctx_plus);
+        Eigen::Vector3d a_minus = gravity_.compute_acceleration(ctx_minus);
         
         da_dr_numerical.col(i) = (a_plus - a_minus) / (2.0 * epsilon);
     }
@@ -252,11 +252,11 @@ TEST_F(J2GravityTest, ReducesToPointMassAtEquator) {
     ctx.position << 7e6, 0.0, 0.0;
     ctx.velocity = Eigen::Vector3d::Zero();
     
-    Eigen::Vector3d a_j2 = gravity_.compute_force(ctx);
+    Eigen::Vector3d a_j2 = gravity_.compute_acceleration(ctx);
     
     // Point mass only
     PointMassGravity pm_gravity(EARTH_MU);
-    Eigen::Vector3d a_pm = pm_gravity.compute_force(ctx);
+    Eigen::Vector3d a_pm = pm_gravity.compute_acceleration(ctx);
     
     // J2 effect should be small at equator
     double relative_diff = (a_j2 - a_pm).norm() / a_pm.norm();
@@ -274,12 +274,12 @@ TEST_F(J2GravityTest, OblatePerturbation) {
     ctx_pole.position << 0.0, 0.0, r;
     ctx_equator.position << r, 0.0, 0.0;
     
-    Eigen::Vector3d a_pole = gravity_.compute_force(ctx_pole);
-    Eigen::Vector3d a_equator = gravity_.compute_force(ctx_equator);
+    Eigen::Vector3d a_pole = gravity_.compute_acceleration(ctx_pole);
+    Eigen::Vector3d a_equator = gravity_.compute_acceleration(ctx_equator);
     
     // At pole, perturbation increases radial acceleration
     PointMassGravity pm_gravity(EARTH_MU);
-    Eigen::Vector3d a_pm_pole = pm_gravity.compute_force(ctx_pole);
+    Eigen::Vector3d a_pm_pole = pm_gravity.compute_acceleration(ctx_pole);
     
     EXPECT_GT(a_pole.norm(), a_pm_pole.norm());
 }
@@ -296,8 +296,8 @@ TEST_F(J2GravityTest, ZonalHarmonicSymmetry) {
     ctx1.position << rho, 0.0, z;
     ctx2.position << 0.0, rho, z;
     
-    Eigen::Vector3d a1 = gravity_.compute_force(ctx1);
-    Eigen::Vector3d a2 = gravity_.compute_force(ctx2);
+    Eigen::Vector3d a1 = gravity_.compute_acceleration(ctx1);
+    Eigen::Vector3d a2 = gravity_.compute_acceleration(ctx2);
     
     // Magnitudes should be equal
     EXPECT_NEAR(a1.norm(), a2.norm(), 1e-8);
@@ -310,10 +310,10 @@ TEST_F(J2GravityTest, PerturbationMagnitude) {
     ctx.position << 5e6, 3e6, 4e6;
     ctx.velocity = Eigen::Vector3d::Zero();
     
-    Eigen::Vector3d a_j2 = gravity_.compute_force(ctx);
+    Eigen::Vector3d a_j2 = gravity_.compute_acceleration(ctx);
     
     PointMassGravity pm_gravity(EARTH_MU);
-    Eigen::Vector3d a_pm = pm_gravity.compute_force(ctx);
+    Eigen::Vector3d a_pm = pm_gravity.compute_acceleration(ctx);
     
     double perturbation = (a_j2 - a_pm).norm() / a_pm.norm();
     
@@ -332,12 +332,12 @@ TEST_F(J2GravityTest, IncreasingWithAltitude) {
     
     PointMassGravity pm_gravity(EARTH_MU);
     
-    Eigen::Vector3d a_j2_low = gravity_.compute_force(ctx_low);
-    Eigen::Vector3d a_pm_low = pm_gravity.compute_force(ctx_low);
+    Eigen::Vector3d a_j2_low = gravity_.compute_acceleration(ctx_low);
+    Eigen::Vector3d a_pm_low = pm_gravity.compute_acceleration(ctx_low);
     double pert_low = (a_j2_low - a_pm_low).norm() / a_pm_low.norm();
     
-    Eigen::Vector3d a_j2_high = gravity_.compute_force(ctx_high);
-    Eigen::Vector3d a_pm_high = pm_gravity.compute_force(ctx_high);
+    Eigen::Vector3d a_j2_high = gravity_.compute_acceleration(ctx_high);
+    Eigen::Vector3d a_pm_high = pm_gravity.compute_acceleration(ctx_high);
     double pert_high = (a_j2_high - a_pm_high).norm() / a_pm_high.norm();
     
     // Perturbation should decrease with altitude
@@ -352,8 +352,8 @@ TEST_F(J2GravityTest, VelocityIndependent) {
     ctx2.position = ctx1.position;
     ctx2.velocity << -500.0, 1000.0, -250.0;
     
-    Eigen::Vector3d a1 = gravity_.compute_force(ctx1);
-    Eigen::Vector3d a2 = gravity_.compute_force(ctx2);
+    Eigen::Vector3d a1 = gravity_.compute_acceleration(ctx1);
+    Eigen::Vector3d a2 = gravity_.compute_acceleration(ctx2);
     
     EXPECT_EQ(a1, a2);
 }
@@ -381,8 +381,8 @@ TEST_F(J2GravityTest, JacobianPositionNumerical) {
         ctx_plus.position(i) += epsilon;
         ctx_minus.position(i) -= epsilon;
         
-        Eigen::Vector3d a_plus = gravity_.compute_force(ctx_plus);
-        Eigen::Vector3d a_minus = gravity_.compute_force(ctx_minus);
+        Eigen::Vector3d a_plus = gravity_.compute_acceleration(ctx_plus);
+        Eigen::Vector3d a_minus = gravity_.compute_acceleration(ctx_minus);
         
         da_dr_numerical.col(i) = (a_plus - a_minus) / (2.0 * epsilon);
     }
@@ -460,8 +460,8 @@ TEST(GravityComparisonTest, J2SmallPerturbation) {
     ctx.position << 7e6, 2e6, 3e6;
     ctx.velocity = Eigen::Vector3d::Zero();
     
-    Eigen::Vector3d a_pm = pm_gravity.compute_force(ctx);
-    Eigen::Vector3d a_j2 = j2_gravity.compute_force(ctx);
+    Eigen::Vector3d a_pm = pm_gravity.compute_acceleration(ctx);
+    Eigen::Vector3d a_j2 = j2_gravity.compute_acceleration(ctx);
     
     double perturbation = (a_j2 - a_pm).norm() / a_pm.norm();
     EXPECT_LT(perturbation, 0.002);  // Less than 0.2%
@@ -501,7 +501,7 @@ TEST(GravityOrbitalTest, CircularOrbitAcceleration) {
     ctx.position << r, 0.0, 0.0;
     ctx.velocity << 0.0, v, 0.0;
     
-    Eigen::Vector3d a = gravity.compute_force(ctx);
+    Eigen::Vector3d a = gravity.compute_acceleration(ctx);
     
     // Centripetal acceleration
     double a_centripetal = v * v / r;
@@ -522,7 +522,7 @@ TEST(GravityOrbitalTest, EscapeVelocity) {
     ctx.position << r, 0.0, 0.0;
     ctx.velocity << 0.0, v_escape, 0.0;
     
-    Eigen::Vector3d a = gravity.compute_force(ctx);
+    Eigen::Vector3d a = gravity.compute_acceleration(ctx);
     
     // At escape velocity, specific energy = 0
     // E = v²/2 - μ/r = 0
@@ -543,7 +543,7 @@ TEST(GravityOrbitalTest, Geostationary) {
     ctx.position << r_geo, 0.0, 0.0;
     ctx.velocity = Eigen::Vector3d::Zero();
     
-    Eigen::Vector3d a = gravity.compute_force(ctx);
+    Eigen::Vector3d a = gravity.compute_acceleration(ctx);
     
     // Centripetal acceleration for geostationary orbit
     double a_expected = OMEGA_EARTH * OMEGA_EARTH * r_geo;

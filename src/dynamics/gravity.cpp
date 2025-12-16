@@ -6,7 +6,7 @@ PointMassGravity::PointMassGravity(double GM)
     : GM_(GM)
 {}
 
-auto PointMassGravity::compute_force(const ForceContext& ctx) const -> Eigen::Vector3d {
+auto PointMassGravity::compute_acceleration(const ForceContext& ctx) const -> Eigen::Vector3d {
     double r_norm = ctx.position.norm();
     return -GM_ / (r_norm * r_norm * r_norm) * ctx.position;
 }
@@ -37,7 +37,7 @@ J2Gravity::J2Gravity(double GM, double J2, double Re)
     : GM_(GM), J2_(J2), Re_(Re)
 {}
 
-auto J2Gravity::compute_force(const ForceContext& ctx) const -> Eigen::Vector3d {
+auto J2Gravity::compute_acceleration(const ForceContext& ctx) const -> Eigen::Vector3d {
     double r_norm = ctx.position.norm();
     double r2 = r_norm * r_norm;
     double r5 = r2 * r2 * r_norm;

@@ -16,7 +16,7 @@ public:
     explicit ConstantForce(const Eigen::Vector3d& acceleration)
         : acceleration_(acceleration) {}
     
-    auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override {
+    auto compute_acceleration(const ForceContext& ctx) const -> Eigen::Vector3d override {
         return acceleration_;
     }
 
@@ -31,7 +31,7 @@ private:
 // Mock force: zero force
 class ZeroForce : public IForce {
 public:
-    auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override {
+    auto compute_acceleration(const ForceContext& ctx) const -> Eigen::Vector3d override {
         return Eigen::Vector3d::Zero();
     }
 
@@ -45,7 +45,7 @@ class DampingForce : public IForce {
 public:
     explicit DampingForce(double coefficient) : k_(coefficient) {}
     
-    auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override {
+    auto compute_acceleration(const ForceContext& ctx) const -> Eigen::Vector3d override {
         return -k_ * ctx.velocity;
     }
 
@@ -62,7 +62,7 @@ class SpringForce : public IForce {
 public:
     explicit SpringForce(double stiffness) : k_(stiffness) {}
     
-    auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override {
+    auto compute_acceleration(const ForceContext& ctx) const -> Eigen::Vector3d override {
         return -k_ * ctx.position;
     }
 
@@ -80,7 +80,7 @@ public:
     explicit SinusoidalForce(double amplitude, double frequency)
         : amplitude_(amplitude), omega_(2.0 * M_PI * frequency) {}
     
-    auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override {
+    auto compute_acceleration(const ForceContext& ctx) const -> Eigen::Vector3d override {
         double magnitude = amplitude_ * std::sin(omega_ * ctx.t);
         return Eigen::Vector3d(magnitude, 0.0, 0.0);
     }
@@ -259,7 +259,7 @@ TEST_F(PointMassDynamicsTest, TimeDependentForce) {
 TEST_F(PointMassDynamicsTest, ContextPopulation) {
     class ContextCheckerForce : public IForce {
     public:
-        auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override {
+        auto compute_acceleration(const ForceContext& ctx) const -> Eigen::Vector3d override {
             last_time = ctx.t;
             last_position = ctx.position;
             last_velocity = ctx.velocity;
@@ -492,7 +492,7 @@ public:
         const Eigen::Matrix3d& velocity_jacobian)
         : da_dr_(position_jacobian), da_dv_(velocity_jacobian) {}
     
-    auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override {
+    auto compute_acceleration(const ForceContext& ctx) const -> Eigen::Vector3d override {
         return da_dr_ * ctx.position + da_dv_ * ctx.velocity;
     }
 

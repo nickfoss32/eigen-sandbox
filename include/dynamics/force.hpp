@@ -16,12 +16,12 @@ struct ForceContext {
 /// @details This interface represents any force that produces an acceleration
 ///          as a function of state and time:
 ///          
-///          **a** = f(**r**, **v**, t)
+///          a = f(r, v, t)
 ///          
 ///          where:
-///          - **a** ∈ ℝ³ is the acceleration vector (m/s²)
-///          - **r** ∈ ℝ³ is the position vector (m)
-///          - **v** ∈ ℝ³ is the velocity vector (m/s)
+///          - a ∈ ℝ³ is the acceleration vector (m/s²)
+///          - r ∈ ℝ³ is the position vector (m)
+///          - v ∈ ℝ³ is the velocity vector (m/s)
 ///          - t ∈ ℝ is time (s)
 ///          
 ///          Most forces are **autonomous** (time-independent), such as:
@@ -51,23 +51,23 @@ public:
     /// @details Returns the instantaneous acceleration due to this force
     ///          evaluated at the given state (position, velocity) and time.
     ///          
-    ///          **a** = f(**r**, **v**, t)
+    ///          a = f(r, v, t)
     ///          
     ///          For time-independent (autonomous) forces, t may be ignored.
     ///          
     /// @param ctx Force context containing time, position, and velocity
     /// @return Acceleration vector (m/s²)
-    virtual Eigen::Vector3d compute_force(const ForceContext& ctx) const = 0;
+    virtual auto compute_acceleration(const ForceContext& ctx) const -> Eigen::Vector3d = 0;
     
     /// @brief Computes the Jacobian matrices ∂f/∂r and ∂f/∂v
     /// 
     /// @details Returns the partial derivatives of the force acceleration
     ///          with respect to position and velocity:
     ///          
-    ///          ∂**a**/∂**r** = ∂f/∂**r** ∈ ℝ³ˣ³
-    ///          ∂**a**/∂**v** = ∂f/∂**v** ∈ ℝ³ˣ³
+    ///          ∂a/∂r = ∂f/∂r ∈ ℝ³ˣ³
+    ///          ∂a/∂v = ∂f/∂v ∈ ℝ³ˣ³
     ///          
-    ///          These Jacobians are used by the Extended Kalman Filter to
+    ///          These Jacobians can be used in an Extended Kalman Filter to
     ///          linearize the dynamics and propagate covariance.
     ///          
     /// @param ctx Force context containing time, position, and velocity
@@ -75,9 +75,7 @@ public:
     /// @note If force is position-independent, return ∂f/∂r = 0
     /// @note If force is velocity-independent, return ∂f/∂v = 0
     /// @note Time derivatives ∂f/∂t are not needed (used only for explicit time dependence)
-    virtual std::pair<Eigen::Matrix3d, Eigen::Matrix3d> compute_jacobian(
-        const ForceContext& ctx
-    ) const = 0;
+    virtual auto compute_jacobian(const ForceContext& ctx) const -> std::pair<Eigen::Matrix3d, Eigen::Matrix3d> = 0;
 };
 
 } // namespace dynamics
