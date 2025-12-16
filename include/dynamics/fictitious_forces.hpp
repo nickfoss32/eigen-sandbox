@@ -14,7 +14,7 @@ public:
     explicit FictitiousForces(const Eigen::Vector3d& omega = Eigen::Vector3d(0.0, 0.0, 7.292115e-5));
 
     /// @brief Computes fictitious accelerations (Coriolis + centrifugal)
-    auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override;
+    auto compute_acceleration(const ForceContext& ctx) const -> Eigen::Vector3d override;
 
     /// @brief Compute force Jacobian
     /// @param t Time

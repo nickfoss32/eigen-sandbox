@@ -15,7 +15,7 @@ auto PointMassDynamics::compute_dynamics(double t, const Eigen::VectorXd& state)
     // Sum all forces
     Eigen::Vector3d total_acceleration = Eigen::Vector3d::Zero();
     for (const auto& force : forces_) {
-        total_acceleration += force->compute_force(ctx);
+        total_acceleration += force->compute_acceleration(ctx);
     }
 
     // Build derivative [velocity, acceleration]

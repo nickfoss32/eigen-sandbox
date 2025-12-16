@@ -21,6 +21,7 @@ gtest_discover_tests(common_tests)
 add_executable(dynamics_tests
     test_dynamics_aerodynamic_torque.cpp
     test_dynamics_atmosphere.cpp
+    test_dynamics_atmospheric_drag.cpp
     test_dynamics_fictitious_forces.cpp
     test_dynamics_gravity_gradient_torque.cpp
     test_dynamics_gravity.cpp

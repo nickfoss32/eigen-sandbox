@@ -29,12 +29,12 @@ auto RigidBodyDynamics6DOF::compute_dynamics(double t, const Eigen::VectorXd& st
     force_ctx.position = position;
     force_ctx.velocity = velocity;
 
-    // Sum all forces (in inertial frame)
-    Eigen::Vector3d total_force = Eigen::Vector3d::Zero();
+    // Sum all accelerations (in inertial frame)
+    Eigen::Vector3d total_acceleration = Eigen::Vector3d::Zero();
     for (const auto& force : forces_) {
-        total_force += force->compute_force(force_ctx) * mass_;
+        total_acceleration += force->compute_acceleration(force_ctx) * mass_;
     }
-    Eigen::Vector3d acceleration = total_force / mass_;
+    Eigen::Vector3d acceleration = total_acceleration / mass_;
 
     // Build torque context
     TorqueContext torque_ctx;

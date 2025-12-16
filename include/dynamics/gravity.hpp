@@ -18,7 +18,7 @@ public:
 
     /// @brief Computes gravitational acceleration at position
     /// @details computes: f(x,v) = a = -μ/r³ * r
-    auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override;
+    auto compute_acceleration(const ForceContext& ctx) const -> Eigen::Vector3d override;
 
     /// @brief Computes Jacobian of gravitational acceleration
     /// @details computes: da/d
@@ -38,7 +38,7 @@ public:
     explicit J2Gravity(double GM = 3.986004418e14, double J2 = 1.08262668e-3, double Re = 6378137.0);
 
     /// @brief Computes gravitational acceleration including J2 perturbation
-    auto compute_force(const ForceContext& ctx) const -> Eigen::Vector3d override;
+    auto compute_acceleration(const ForceContext& ctx) const -> Eigen::Vector3d override;
 
     /// @brief Computes Jacobian of gravitational acceleration
     auto compute_jacobian(const ForceContext& ctx) const -> std::pair<Eigen::Matrix3d, Eigen::Matrix3d> override;
