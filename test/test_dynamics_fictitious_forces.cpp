@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "dynamics/fictitious_forces.hpp"
-#include "dynamics/force.hpp"
+#include "dynamics/forces/fictitious_forces.hpp"
+#include "dynamics/forces/force.hpp"
 
 #include <Eigen/Dense>
 

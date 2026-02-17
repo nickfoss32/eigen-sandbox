@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "dynamics/gravity.hpp"
+#include "dynamics/forces/gravity.hpp"
 #include <cmath>
 
 using namespace dynamics;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dynamics/force.hpp"
+#include "dynamics/forces/force.hpp"
 
 #include <Eigen/Dense>
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Eigen/Dense>
+#include <Eigen/Geometry>
 
 #include <memory>
 
@@ -8,10 +9,10 @@ namespace sensor {
 
 /// @brief Context for sensor measurement computation
 struct SensorContext {
-    Eigen::VectorXd state;           ///< True state vector
-    double time;                     ///< Measurement time
-    Eigen::Vector3d sensor_position; ///< Sensor location
-    Eigen::Quaterniond sensor_orientation; ///< Sensor orientation
+    Eigen::VectorXd state;                              ///< True state vector
+    double time = 0.0;                                  ///< Measurement time
+    Eigen::Vector3d sensor_position = Eigen::Vector3d::Zero();   ///< Sensor location
+    Eigen::Quaterniond sensor_orientation = Eigen::Quaterniond::Identity(); ///< Sensor orientation
 };
 
 /// @brief Abstract sensor model

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Eigen/Dense>
+#include <Eigen/Geometry>
 
 #include <string>
 #include <vector>
@@ -20,6 +21,8 @@ struct Measurement {
     Eigen::VectorXd z;              ///< Measurement vector
     Eigen::MatrixXd R;              ///< Measurement noise covariance
     double time;                    ///< Measurement timestamp (seconds)
+    Eigen::Vector3d sensor_position;      ///< Sensor position (frame-consistent with filter state)
+    Eigen::Quaterniond sensor_orientation;///< Sensor orientation (same frame as state)
     std::string sensor_id;          ///< Sensor identifier
     int measurement_id;             ///< Unique measurement ID
     

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "dynamics/atmosphere.hpp"
+#include "dynamics/atmosphere/atmosphere.hpp"
 #include <cmath>
 
 using namespace dynamics::atmosphere;

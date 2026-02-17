@@ -1,5 +1,5 @@
 #include "dynamics/rigid_body_dynamics.hpp"
-#include "dynamics/atmosphere.hpp"
+#include "dynamics/atmosphere/atmosphere.hpp"
 
 namespace dynamics {
 

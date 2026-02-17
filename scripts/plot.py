@@ -24,6 +24,8 @@ simulation = summary.get("simulation", {})
 launch = simulation.get("launch", {})
 noise = simulation.get("noise", {})
 coordFrame = simulation.get("coordinate_frame", {})
+if not coordFrame:
+    coordFrame = "ECEF"
 
 # Format metadata as a string
 metadata_text = (
@@ -41,24 +43,61 @@ metadata_text = (
     f"Noise Sigma Vel: {noise.get('sigma_vel', 'N/A')} m/s<br>"
 )
 
-# Extract time and state vectors
-times = [point["time"] for point in data["points"]]
-x = np.array([point["state"][0] for point in data["points"]])
-y = np.array([point["state"][1] for point in data["points"]])
-z = np.array([point["state"][2] for point in data["points"]])
+# Extract trajectory points
+trajectory_sets = []
+if isinstance(data.get("trajectories"), list) and data["trajectories"]:
+    for idx, traj in enumerate(data["trajectories"]):
+        points = traj.get("points", [])
+        if not points:
+            continue
+        trajectory_sets.append(
+            {
+                "name": traj.get("name", f"Trajectory {idx + 1}"),
+                "times": [point["time"] for point in points],
+                "x": np.array([point["state"][0] for point in points]),
+                "y": np.array([point["state"][1] for point in points]),
+                "z": np.array([point["state"][2] for point in points]),
+            }
+        )
+elif isinstance(data.get("points"), list) and data["points"]:
+    points = data["points"]
+    trajectory_sets.append(
+        {
+            "name": "Trajectory",
+            "times": [point["time"] for point in points],
+            "x": np.array([point["state"][0] for point in points]),
+            "y": np.array([point["state"][1] for point in points]),
+            "z": np.array([point["state"][2] for point in points]),
+        }
+    )
+else:
+    print("Error: JSON must contain non-empty 'points' or 'trajectories'.")
+    exit(1)
 
-# Create 3D trajectory trace
-trajectory_trace = go.Scatter3d(
-    x=x,
-    y=y,
-    z=z,
-    mode="markers",
-    name="Trajectory",
-    marker=dict(color="red", size=2),
-    hovertemplate="Time: %{text:.2f}s<br>X: %{x:.2f}<br>Y: %{y:.2f}<br>Z: %{z:.2f}",
-    text=times,
-    visible=True
-)
+# Use the first trajectory for zoom window and optional plane-fit context
+times = trajectory_sets[0]["times"]
+x = trajectory_sets[0]["x"]
+y = trajectory_sets[0]["y"]
+z = trajectory_sets[0]["z"]
+
+# Create 3D trajectory traces
+trajectory_colors = ["red", "orange", "green", "purple", "cyan", "magenta", "gold"]
+trajectory_traces = []
+for idx, traj in enumerate(trajectory_sets):
+    color = trajectory_colors[idx % len(trajectory_colors)]
+    trajectory_traces.append(
+        go.Scatter3d(
+            x=traj["x"],
+            y=traj["y"],
+            z=traj["z"],
+            mode="markers",
+            name=traj["name"],
+            marker=dict(color=color, size=3, symbol="circle"),
+            hovertemplate="Time: %{text:.2f}s<br>X: %{x:.2f}<br>Y: %{y:.2f}<br>Z: %{z:.2f}",
+            text=traj["times"],
+            visible=True
+        )
+    )
 
 # Get launch point (first point) and convert to spherical coordinates
 earth_radius = 6371000  # meters
@@ -113,7 +152,8 @@ globe_trace_zoomed = go.Surface(
 )
 
 # Load Shapefile for country boundaries
-shapefile_path = "resources/ne/ne_110m_land.shp"
+script_dir = os.path.dirname(os.path.abspath(__file__))
+shapefile_path = os.path.join(script_dir, "resources", "ne", "ne_110m_land.shp")
 try:
     gdf = gpd.read_file(shapefile_path)
 except FileNotFoundError:
@@ -177,11 +217,12 @@ for _, row in gdf.iterrows():
             )
 
 # Extract best fit plane parameters if available
-has_fit = "fit" in data["summary"]
+fit = summary.get("fit", {})
+has_fit = bool(fit.get("normal")) and bool(fit.get("point"))
 plane_trace = None
 if has_fit:
-    normal_list = data["summary"]["fit"]["normal"]
-    point_list = data["summary"]["fit"]["point"]
+    normal_list = fit["normal"]
+    point_list = fit["point"]
     normal = np.array(normal_list)
     point = np.array(point_list)
     normal = normal / np.linalg.norm(normal)  # Unit normal
@@ -240,8 +281,9 @@ if has_fit:
 
 # Define update menus for toggling views
 has_plane = plane_trace is not None
-full_visible = [True, False, True] + ([True] if has_plane else []) + [True] * len(full_country_traces) + [False] * len(zoomed_country_traces)
-zoom_visible = [False, True, True] + ([True] if has_plane else []) + [False] * len(full_country_traces) + [True] * len(zoomed_country_traces)
+num_trajectory_traces = len(trajectory_traces)
+full_visible = [True, False] + [True] * num_trajectory_traces + ([True] if has_plane else []) + [True] * len(full_country_traces) + [False] * len(zoomed_country_traces)
+zoom_visible = [False, True] + [True] * num_trajectory_traces + ([True] if has_plane else []) + [False] * len(full_country_traces) + [True] * len(zoomed_country_traces)
 updatemenus = [
     dict(
         buttons=[
@@ -266,7 +308,7 @@ updatemenus = [
 ]
 
 # Create figure
-data_traces = [globe_trace_full, globe_trace_zoomed, trajectory_trace]
+data_traces = [globe_trace_full, globe_trace_zoomed] + trajectory_traces
 if plane_trace:
     data_traces.append(plane_trace)
 data_traces += full_country_traces + zoomed_country_traces
@@ -276,16 +318,16 @@ fig = go.Figure(data=data_traces)
 filename = os.path.basename(args.trajectory_file)
 fig.update_layout(
     title=dict(
-        text= "ECEF Track Trajectory from: {filename}",
+        text=f"Track Trajectory from: {filename}",
         x=0.5,
         xanchor="center",
         y=0.95,
         yanchor="top"
     ),
     scene=dict(
-        xaxis_title="X (ECEF M)",
-        yaxis_title="Y (ECEF M)",
-        zaxis_title="Z (ECEF M)",
+        xaxis_title=f"X ({coordFrame} M)",
+        yaxis_title=f"Y ({coordFrame} M)",
+        zaxis_title=f"Z ({coordFrame} M)",
         aspectmode="cube",
         xaxis=dict(showgrid=False),
         yaxis=dict(showgrid=False),

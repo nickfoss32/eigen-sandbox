@@ -94,6 +94,8 @@ TEST(MeasurementTest, MetadataInitialization) {
     EXPECT_EQ(meas.measurement_id, -1);
     EXPECT_FALSE(meas.is_associated);
     EXPECT_EQ(meas.track_id, -1);
+    EXPECT_TRUE(meas.sensor_position.isZero(0.0));
+    EXPECT_TRUE(meas.sensor_orientation.isApprox(Eigen::Quaterniond::Identity()));
 }
 
 TEST(MeasurementTest, MetadataCanBeSet) {
@@ -105,9 +107,12 @@ TEST(MeasurementTest, MetadataCanBeSet) {
     meas.measurement_id = 42;
     meas.is_associated = true;
     meas.track_id = 5;
+    meas.sensor_position = Eigen::Vector3d(1.0, 2.0, 3.0);
+    meas.sensor_orientation = Eigen::Quaterniond::Identity();
     
     EXPECT_EQ(meas.sensor_id, "radar_1");
     EXPECT_EQ(meas.measurement_id, 42);
     EXPECT_TRUE(meas.is_associated);
     EXPECT_EQ(meas.track_id, 5);
+    EXPECT_TRUE(meas.sensor_position.isApprox(Eigen::Vector3d(1.0, 2.0, 3.0)));
 }

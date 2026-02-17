@@ -1,4 +1,4 @@
-#include "dynamics/gravity_gradient_torque.hpp"
+#include "dynamics/torques/gravity_gradient_torque.hpp"
 
 namespace dynamics {
 

@@ -10,6 +10,8 @@ namespace common {
 
 Measurement::Measurement()
     : time(0.0),
+      sensor_position(Eigen::Vector3d::Zero()),
+      sensor_orientation(Eigen::Quaterniond::Identity()),
       sensor_id(""),
       measurement_id(-1),
       is_associated(false),
@@ -25,6 +27,8 @@ Measurement::Measurement(
 ) : z(z_),
     R(R_),
     time(time_),
+    sensor_position(Eigen::Vector3d::Zero()),
+    sensor_orientation(Eigen::Quaterniond::Identity()),
     sensor_id(""),
     measurement_id(-1),
     is_associated(false),

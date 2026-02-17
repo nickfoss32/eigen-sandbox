@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "dynamics/point_mass_dynamics.hpp"
-#include "dynamics/force.hpp"
+#include "dynamics/forces/force.hpp"
 
 #include <Eigen/Dense>
 

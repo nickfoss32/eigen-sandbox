@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dynamics/torque.hpp"
+#include "dynamics/torques/torque.hpp"
 
 namespace dynamics {
 

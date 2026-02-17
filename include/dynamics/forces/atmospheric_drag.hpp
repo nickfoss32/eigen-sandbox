@@ -1,7 +1,7 @@
 #pragma once
 
-#include "force.hpp"
-#include "atmosphere.hpp"
+#include "dynamics/forces/force.hpp"
+#include "dynamics/atmosphere/atmosphere.hpp"
 #include <Eigen/Dense>
 
 namespace dynamics {

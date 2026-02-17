@@ -65,6 +65,22 @@ target_link_libraries(generate-data
         tracking::transforms
 )
 
+add_executable(imm-demo apps/imm_demo.cpp)
+target_include_directories(imm-demo PRIVATE include)
+target_link_libraries(imm-demo
+    PRIVATE
+        Eigen3::Eigen
+        nlohmann_json::nlohmann_json
+        Boost::program_options
+        tracking::common
+        tracking::dynamics
+        tracking::estimation
+        tracking::filtering
+        tracking::integrator
+        tracking::propagator
+        tracking::sensor
+)
+
 # Optionally build tests
 if(BUILD_TESTS)
     include(FetchContent)

@@ -1,4 +1,4 @@
-#include "dynamics/atmospheric_drag.hpp"
+#include "dynamics/forces/atmospheric_drag.hpp"
 #include <cmath>
 
 namespace dynamics {
