@@ -38,6 +38,8 @@ gtest_discover_tests(dynamics_tests)
 # Filtering tests
 add_executable(filtering_tests
     test_filtering_extended_kalman_filter.cpp
+    test_filtering_unscented_kalman_filter.cpp
+    test_filtering_unscented_transform.cpp
 )
 target_link_libraries(filtering_tests
     PRIVATE

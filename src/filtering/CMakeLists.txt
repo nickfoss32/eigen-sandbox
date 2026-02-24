@@ -4,6 +4,8 @@ find_package(Eigen3 REQUIRED)
 
 add_library(filtering
     extended_kalman_filter.cpp
+    unscented_kalman_filter.cpp
+    unscented_transform.cpp
 )
 add_library(tracking::filtering ALIAS filtering)
 target_include_directories(filtering PUBLIC ${CMAKE_SOURCE_DIR}/include)
