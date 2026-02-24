@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include "dynamics/rigid_body_dynamics.hpp"
-#include "dynamics/gravity.hpp"
-#include "dynamics/gravity_gradient_torque.hpp"
-#include "dynamics/aerodynamic_torque.hpp"
+#include "dynamics/forces/gravity.hpp"
+#include "dynamics/torques/gravity_gradient_torque.hpp"
+#include "dynamics/torques/aerodynamic_torque.hpp"
 #include <cmath>
 #include <memory>
 

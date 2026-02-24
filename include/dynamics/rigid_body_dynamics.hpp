@@ -1,8 +1,8 @@
 #pragma once
 
 #include "dynamics/dynamics.hpp"
-#include "dynamics/force.hpp"
-#include "dynamics/torque.hpp"
+#include "dynamics/forces/force.hpp"
+#include "dynamics/torques/torque.hpp"
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>

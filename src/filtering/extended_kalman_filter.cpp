@@ -1,6 +1,8 @@
 #include "filtering/extended_kalman_filter.hpp"
 #include "sensor/sensor_model.hpp"
 
+#include <cmath>
+#include <numbers>
 #include <stdexcept>
 
 namespace filtering {
@@ -72,11 +74,63 @@ void ExtendedKalmanFilter::predict(double dt) {
     current_time_ = t_end;
 }
 
+double ExtendedKalmanFilter::get_innovation_likelihood(
+    const common::Measurement& measurement
+) const {
+    // Build sensor context at the current filter state.
+    sensor::SensorContext ctx;
+    ctx.state = x_;
+    ctx.time = measurement.time;
+    ctx.sensor_position = measurement.sensor_position;
+    ctx.sensor_orientation = measurement.sensor_orientation;
+
+    const Eigen::VectorXd z_pred = sensor_model_->compute_measurement(ctx);
+    const Eigen::MatrixXd H = sensor_model_->compute_jacobian(ctx);
+    const Eigen::VectorXd innovation = measurement.z - z_pred;
+    const Eigen::MatrixXd S = H * P_ * H.transpose() + measurement.R;
+
+    Eigen::LDLT<Eigen::MatrixXd> ldlt(S);
+    if (ldlt.info() != Eigen::Success) {
+        return 1e-12;
+    }
+
+    const Eigen::VectorXd D = ldlt.vectorD();
+    double log_det = 0.0;
+    for (int i = 0; i < D.size(); ++i) {
+        if (D(i) <= 0.0 || !std::isfinite(D(i))) {
+            return 1e-12;
+        }
+        log_det += std::log(D(i));
+    }
+
+    const Eigen::VectorXd S_inv_innovation = ldlt.solve(innovation);
+    if (ldlt.info() != Eigen::Success || !S_inv_innovation.allFinite()) {
+        return 1e-12;
+    }
+
+    const double mahalanobis_dist = innovation.dot(S_inv_innovation);
+    if (!std::isfinite(mahalanobis_dist)) {
+        return 1e-12;
+    }
+
+    const double meas_dim = static_cast<double>(innovation.size());
+    const double log_likelihood =
+        -0.5 * (meas_dim * std::log(2.0 * std::numbers::pi) + log_det + mahalanobis_dist);
+
+    if (!std::isfinite(log_likelihood)) {
+        return 1e-12;
+    }
+
+    return std::max(std::exp(log_likelihood), 1e-12);
+}
+
 void ExtendedKalmanFilter::update(const common::Measurement& measurement) {
     // Create sensor context
     sensor::SensorContext ctx;
     ctx.state = x_;
     ctx.time = measurement.time;
+    ctx.sensor_position = measurement.sensor_position;
+    ctx.sensor_orientation = measurement.sensor_orientation;
     
     // Predict measurement from current state
     Eigen::VectorXd z_pred = sensor_model_->compute_measurement(ctx);

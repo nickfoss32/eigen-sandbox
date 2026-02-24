@@ -11,8 +11,8 @@
 #include <boost/program_options.hpp>
 
 #include <common/coordinate_frame.hpp>
-#include <dynamics/fictitious_forces.hpp>
-#include <dynamics/gravity.hpp>
+#include <dynamics/forces/fictitious_forces.hpp>
+#include <dynamics/forces/gravity.hpp>
 #include <dynamics/point_mass_dynamics.hpp>
 #include <fitting/plane_fit.hpp>
 #include <fitting/factory.hpp>

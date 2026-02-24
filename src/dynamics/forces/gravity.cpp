@@ -1,4 +1,4 @@
-#include "dynamics/gravity.hpp"
+#include "dynamics/forces/gravity.hpp"
 
 namespace dynamics {
 

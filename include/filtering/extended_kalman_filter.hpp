@@ -35,6 +35,7 @@ public:
 
     void predict(double dt) override;
     void update(const common::Measurement& measurement) override;
+    double get_innovation_likelihood(const common::Measurement& measurement) const override;
     
     Eigen::VectorXd get_state() const override { return x_; }
     Eigen::MatrixXd get_covariance() const override { return P_; }
@@ -50,8 +51,8 @@ public:
         const Eigen::VectorXd& initial_state,
         const Eigen::MatrixXd& initial_covariance,
         double initial_time = 0.0
-    ) override {
-        KalmanFilterBase::reset(initial_state, initial_covariance, initial_time);
+    ) {
+        KalmanFilterBase::reset(initial_state, initial_covariance);
         current_time_ = initial_time;
     }
 

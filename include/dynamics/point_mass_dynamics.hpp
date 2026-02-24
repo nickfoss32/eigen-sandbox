@@ -1,7 +1,7 @@
 #pragma once
 
 #include "dynamics/dynamics.hpp"
-#include "dynamics/force.hpp"
+#include "dynamics/forces/force.hpp"
 
 #include <Eigen/Dense>
 

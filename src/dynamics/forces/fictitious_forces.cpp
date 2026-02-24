@@ -1,4 +1,4 @@
-#include "dynamics/fictitious_forces.hpp"
+#include "dynamics/forces/fictitious_forces.hpp"
 
 namespace dynamics {
 

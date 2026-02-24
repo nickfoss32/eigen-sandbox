@@ -1,5 +1,5 @@
-#include "dynamics/aerodynamic_torque.hpp"
-#include "dynamics/atmosphere.hpp"
+#include "dynamics/torques/aerodynamic_torque.hpp"
+#include "dynamics/atmosphere/atmosphere.hpp"
 
 namespace dynamics {
 

@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 
-#include "dynamics/atmospheric_drag.hpp"
+#include "dynamics/forces/atmospheric_drag.hpp"
 #include "dynamics/point_mass_dynamics.hpp"
 #include "dynamics/rigid_body_dynamics.hpp"
-#include "dynamics/gravity.hpp"
+#include "dynamics/forces/gravity.hpp"
 
 #include <Eigen/Dense>
 #include <memory>

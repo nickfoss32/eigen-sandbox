@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "dynamics/gravity_gradient_torque.hpp"
+#include "dynamics/torques/gravity_gradient_torque.hpp"
 #include <cmath>
 
 using namespace dynamics;

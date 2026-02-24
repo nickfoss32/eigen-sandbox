@@ -57,7 +57,7 @@ auto NumericalPropagator::compute_transition_jacobian(double t0, const Eigen::Ve
     
     // Compute each column of Jacobian via finite differences
     for (int i = 0; i < n; ++i) {
-        // FIXED: Use adaptive epsilon based on state magnitude
+        // Use adaptive epsilon based on state magnitude
         // For position (meters), use ~0.1m perturbation
         // For velocity (m/s), use ~0.1 m/s perturbation
         double state_magnitude = std::abs(state(i));

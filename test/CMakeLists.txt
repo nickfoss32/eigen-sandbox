@@ -50,6 +50,22 @@ target_link_libraries(filtering_tests
 )
 gtest_discover_tests(filtering_tests)
 
+# Estimation tests
+add_executable(estimation_tests
+    test_estimation_imm.cpp
+)
+target_link_libraries(estimation_tests
+    PRIVATE
+        GTest::gtest_main
+        tracking::estimation
+        tracking::filtering
+        tracking::integrator
+        tracking::propagator
+        tracking::sensor
+        tracking::dynamics
+)
+gtest_discover_tests(estimation_tests)
+
 # Integrator tests
 add_executable(integrator_tests
     test_integrator_rk4.cpp
@@ -88,6 +104,7 @@ gtest_discover_tests(propagator_tests)
 # Sensor tests
 add_executable(sensor_tests
     test_sensor_radar_sensor_model.cpp
+    test_sensor_space_based_optical_sensor_model.cpp
 )
 target_link_libraries(sensor_tests
     PRIVATE

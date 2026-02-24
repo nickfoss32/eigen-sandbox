@@ -3,7 +3,7 @@
 #include "filtering/extended_kalman_filter.hpp"
 #include "propagator/numerical_propagator.hpp"
 #include "dynamics/point_mass_dynamics.hpp"
-#include "dynamics/gravity.hpp"
+#include "dynamics/forces/gravity.hpp"
 #include "integrator/rk4.hpp"
 #include "sensor/radar_sensor_model.hpp"
 #include "common/types.hpp"

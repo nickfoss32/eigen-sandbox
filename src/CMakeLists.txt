@@ -4,6 +4,9 @@ add_subdirectory(common)
 # dynamics lib
 add_subdirectory(dynamics)
 
+# estimation lib
+add_subdirectory(estimation)
+
 # filtering lib
 add_subdirectory(filtering)
 
