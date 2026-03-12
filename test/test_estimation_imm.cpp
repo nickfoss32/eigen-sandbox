@@ -6,6 +6,7 @@
 #include <dynamics/point_mass_dynamics.hpp>
 #include <estimation/imm.hpp>
 #include <filtering/extended_kalman_filter.hpp>
+#include <filtering/unscented_kalman_filter.hpp>
 #include <integrator/rk4.hpp>
 #include <propagator/numerical_propagator.hpp>
 #include <sensor/radar_sensor_model.hpp>
@@ -26,6 +27,19 @@ auto make_process_noise(double q_pos, double q_vel)
         return Q;
     };
 }
+
+auto make_simplex_params() -> filtering::UnscentedTransformParameters {
+    filtering::UnscentedTransformParameters params;
+    params.sigma_point_scheme =
+        filtering::UnscentedSigmaPointScheme::JulierSphericalSimplex;
+    params.simplex_weight_0 = 0.5;
+    return params;
+}
+
+enum class FilterKind {
+    ExtendedKalman,
+    UnscentedKalman
+};
 
 class IMMTest : public ::testing::Test {
 protected:
@@ -64,7 +78,8 @@ protected:
         current_time_ = 0.0;
     }
 
-    auto make_imm() const -> estimation::IMM {
+    auto make_imm(FilterKind filter_kind = FilterKind::ExtendedKalman) const
+        -> estimation::IMM {
         auto integrator = std::make_shared<integrator::RK4Integrator>();
 
         auto model_cv_dynamics = std::make_shared<dynamics::PointMassDynamics>(
@@ -93,31 +108,37 @@ protected:
             model_ct_dynamics, integrator, kIntegratorStepSeconds
         );
 
+        const auto ut_params = make_simplex_params();
+        auto make_filter =
+            [&](const std::shared_ptr<propagator::NumericalPropagator>& propagator,
+                const filtering::ExtendedKalmanFilter::ProcessNoiseFunction& process_noise)
+                -> std::unique_ptr<filtering::IKalmanFilter> {
+            if (filter_kind == FilterKind::UnscentedKalman) {
+                return std::make_unique<filtering::UnscentedKalmanFilter>(
+                    initial_estimate_,
+                    initial_covariance_,
+                    propagator,
+                    sensor_model_,
+                    process_noise,
+                    0.0,
+                    ut_params
+                );
+            }
+
+            return std::make_unique<filtering::ExtendedKalmanFilter>(
+                initial_estimate_,
+                initial_covariance_,
+                propagator,
+                sensor_model_,
+                process_noise,
+                0.0
+            );
+        };
+
         std::vector<std::unique_ptr<filtering::IKalmanFilter>> filters;
-        filters.push_back(std::make_unique<filtering::ExtendedKalmanFilter>(
-            initial_estimate_,
-            initial_covariance_,
-            model_cv_propagator,
-            sensor_model_,
-            make_process_noise(180.0, 4.0),
-            0.0
-        ));
-        filters.push_back(std::make_unique<filtering::ExtendedKalmanFilter>(
-            initial_estimate_,
-            initial_covariance_,
-            model_ca_propagator,
-            sensor_model_,
-            make_process_noise(70.0, 1.8),
-            0.0
-        ));
-        filters.push_back(std::make_unique<filtering::ExtendedKalmanFilter>(
-            initial_estimate_,
-            initial_covariance_,
-            model_ct_propagator,
-            sensor_model_,
-            make_process_noise(40.0, 0.8),
-            0.0
-        ));
+        filters.push_back(make_filter(model_cv_propagator, make_process_noise(180.0, 4.0)));
+        filters.push_back(make_filter(model_ca_propagator, make_process_noise(70.0, 1.8)));
+        filters.push_back(make_filter(model_ct_propagator, make_process_noise(40.0, 0.8)));
 
         Eigen::VectorXd initial_mode_probs(3);
         initial_mode_probs << (1.0 / 3.0), (1.0 / 3.0), (1.0 / 3.0);
@@ -213,6 +234,46 @@ TEST_F(IMMTest, CombinedEstimateTracksTruthReasonably) {
 
     EXPECT_LT(pos_err, 50.0);
     EXPECT_LT(vel_err, 8.0);
+}
+
+TEST_F(IMMTest, UKFModeProbabilitiesStayNormalizedAndTimeIsConsistent) {
+    auto imm = make_imm(FilterKind::UnscentedKalman);
+    std::mt19937 rng(42);
+
+    for (int k = 0; k < 40; ++k) {
+        const auto measurement = make_measurement(rng);
+        imm.predict(kDtSeconds);
+        imm.update(measurement);
+
+        const Eigen::VectorXd mu = imm.get_model_probabilities();
+        ASSERT_EQ(mu.size(), 3);
+        EXPECT_TRUE(mu.allFinite());
+        EXPECT_NEAR(mu.sum(), 1.0, 1e-9);
+        for (int i = 0; i < mu.size(); ++i) {
+            EXPECT_GE(mu(i), 0.0);
+            EXPECT_LE(mu(i), 1.0);
+        }
+
+        EXPECT_NEAR(imm.get_time(), current_time_, 1e-12);
+    }
+}
+
+TEST_F(IMMTest, UKFCombinedEstimateTracksTruthReasonably) {
+    auto imm = make_imm(FilterKind::UnscentedKalman);
+    std::mt19937 rng(42);
+
+    for (int k = 0; k < 90; ++k) {
+        const auto measurement = make_measurement(rng);
+        imm.predict(kDtSeconds);
+        imm.update(measurement);
+    }
+
+    const Eigen::VectorXd estimate = imm.get_state();
+    const double pos_err = (estimate.head<3>() - truth_state_.head<3>()).norm();
+    const double vel_err = (estimate.tail<3>() - truth_state_.tail<3>()).norm();
+
+    EXPECT_LT(pos_err, 65.0);
+    EXPECT_LT(vel_err, 10.0);
 }
 
 } // namespace

@@ -66,11 +66,25 @@ public:
 
     /// @brief Set state estimate.
     /// @param state New state vector.
-    void set_state(const Eigen::VectorXd& state) override { x_ = state; }
+    void set_state(const Eigen::VectorXd& state) override {
+        x_ = state;
+        predicted_sigma_points_.clear();
+        predicted_sigma_weights_.mean.resize(0);
+        predicted_sigma_weights_.covariance.resize(0);
+        predicted_sigma_weights_.lambda = 0.0;
+        has_predicted_sigma_points_ = false;
+    }
 
     /// @brief Set covariance estimate.
     /// @param P New covariance matrix.
-    void set_covariance(const Eigen::MatrixXd& P) override { P_ = P; }
+    void set_covariance(const Eigen::MatrixXd& P) override {
+        P_ = P;
+        predicted_sigma_points_.clear();
+        predicted_sigma_weights_.mean.resize(0);
+        predicted_sigma_weights_.covariance.resize(0);
+        predicted_sigma_weights_.lambda = 0.0;
+        has_predicted_sigma_points_ = false;
+    }
 
     /// @brief Get current filter time.
     /// @return Time in seconds.
@@ -87,6 +101,11 @@ public:
     ) {
         KalmanFilterBase::reset(initial_state, initial_covariance);
         current_time_ = initial_time;
+        predicted_sigma_points_.clear();
+        predicted_sigma_weights_.mean.resize(0);
+        predicted_sigma_weights_.covariance.resize(0);
+        predicted_sigma_weights_.lambda = 0.0;
+        has_predicted_sigma_points_ = false;
     }
 
     /// @brief Get the active UT tuning parameters.
@@ -112,12 +131,22 @@ private:
         Eigen::MatrixXd state_measurement_cross_covariance;
     };
 
+    /// @brief State sigma-point set used for the next measurement update.
+    struct StateSigmaPointSet {
+        std::vector<Eigen::VectorXd> sigma_points;
+        UnscentedTransform::Weights weights;
+    };
+
     /// @brief Predict measurement distribution for a given measurement context.
     /// @param measurement Measurement carrying time/sensor context/noise.
     /// @return Predicted measurement moments and cross-covariance terms.
     auto predict_measurement_distribution(
         const common::Measurement& measurement
     ) const -> MeasurementPrediction;
+
+    /// @brief Return the sigma points representing the current predicted state.
+    /// @return Cached predicted sigma points when available, otherwise freshly generated ones.
+    auto get_state_sigma_point_set() const -> StateSigmaPointSet;
 
     /// @brief Current state estimate.
     Eigen::VectorXd x_;
@@ -139,6 +168,15 @@ private:
 
     /// @brief Unscented transform parameter set used by the filter.
     UnscentedTransformParameters ut_parameters_;
+
+    /// @brief Sigma points propagated during the last predict step.
+    std::vector<Eigen::VectorXd> predicted_sigma_points_;
+
+    /// @brief Weights associated with predicted_sigma_points_.
+    UnscentedTransform::Weights predicted_sigma_weights_;
+
+    /// @brief Whether predicted_sigma_points_ currently matches x_/P_.
+    bool has_predicted_sigma_points_ = false;
 };
 
 } // namespace filtering

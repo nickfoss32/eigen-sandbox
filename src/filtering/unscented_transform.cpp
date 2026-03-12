@@ -11,6 +11,76 @@ namespace {
 constexpr int kMaxJitterAttempts = 8;
 constexpr double kBaseJitter = 1e-12;
 
+auto generate_spherical_simplex_unit_sigma_points_impl(
+    int state_dim,
+    double off_center_weight
+) -> std::vector<Eigen::VectorXd> {
+    if (state_dim <= 0) {
+        throw std::invalid_argument("UnscentedTransform: state dimension must be positive");
+    }
+    if (!(off_center_weight > 0.0)) {
+        throw std::invalid_argument(
+            "UnscentedTransform: spherical-simplex off-center weight must be positive"
+        );
+    }
+
+    std::vector<Eigen::VectorXd> sigma_points;
+    sigma_points.reserve(static_cast<std::size_t>(state_dim + 2));
+
+    const double base_scale = 1.0 / std::sqrt(2.0 * off_center_weight);
+    sigma_points.emplace_back(Eigen::VectorXd::Zero(1));
+    sigma_points.emplace_back(Eigen::VectorXd::Constant(1, -base_scale));
+    sigma_points.emplace_back(Eigen::VectorXd::Constant(1, base_scale));
+
+    for (int dimension = 2; dimension <= state_dim; ++dimension) {
+        std::vector<Eigen::VectorXd> next_sigma_points;
+        next_sigma_points.reserve(static_cast<std::size_t>(dimension + 2));
+        next_sigma_points.emplace_back(Eigen::VectorXd::Zero(dimension));
+
+        const double tail_scale = 1.0 /
+            std::sqrt(static_cast<double>(dimension * (dimension + 1)) * off_center_weight);
+
+        for (int i = 1; i <= dimension; ++i) {
+            Eigen::VectorXd sigma(dimension);
+            sigma.head(dimension - 1) = sigma_points[static_cast<std::size_t>(i)];
+            sigma(dimension - 1) = -tail_scale;
+            next_sigma_points.push_back(std::move(sigma));
+        }
+
+        Eigen::VectorXd final_sigma = Eigen::VectorXd::Zero(dimension);
+        final_sigma(dimension - 1) = static_cast<double>(dimension) * tail_scale;
+        next_sigma_points.push_back(std::move(final_sigma));
+
+        sigma_points = std::move(next_sigma_points);
+    }
+
+    return sigma_points;
+}
+
+auto generate_scaled_symmetric_unit_sigma_points_impl(
+    int state_dim,
+    double scale
+) -> std::vector<Eigen::VectorXd> {
+    if (state_dim <= 0) {
+        throw std::invalid_argument("UnscentedTransform: state dimension must be positive");
+    }
+    if (!(scale > 0.0)) {
+        throw std::invalid_argument("UnscentedTransform: symmetric sigma-point scale must be positive");
+    }
+
+    std::vector<Eigen::VectorXd> sigma_points(static_cast<std::size_t>(2 * state_dim + 1));
+    sigma_points[0] = Eigen::VectorXd::Zero(state_dim);
+
+    for (int i = 0; i < state_dim; ++i) {
+        Eigen::VectorXd offset = Eigen::VectorXd::Zero(state_dim);
+        offset(i) = scale;
+        sigma_points[static_cast<std::size_t>(i + 1)] = offset;
+        sigma_points[static_cast<std::size_t>(i + 1 + state_dim)] = -offset;
+    }
+
+    return sigma_points;
+}
+
 } // namespace
 
 auto UnscentedTransform::validate_parameters(
@@ -20,22 +90,35 @@ auto UnscentedTransform::validate_parameters(
     if (state_dim <= 0) {
         throw std::invalid_argument("UnscentedTransform: state dimension must be positive");
     }
-    if (!(params.alpha > 0.0)) {
-        throw std::invalid_argument("UnscentedTransform: alpha must be positive");
-    }
-    if (params.beta < 0.0) {
-        throw std::invalid_argument("UnscentedTransform: beta must be non-negative");
+    switch (params.sigma_point_scheme) {
+        case UnscentedSigmaPointScheme::JulierSphericalSimplex:
+            if (params.simplex_weight_0 < 0.0 || !(params.simplex_weight_0 < 1.0)) {
+                throw std::invalid_argument(
+                    "UnscentedTransform: simplex_weight_0 must satisfy 0 <= w0 < 1"
+                );
+            }
+            return 0.0;
+        case UnscentedSigmaPointScheme::ScaledSymmetric: {
+            if (!(params.alpha > 0.0)) {
+                throw std::invalid_argument("UnscentedTransform: alpha must be positive");
+            }
+            if (params.beta < 0.0) {
+                throw std::invalid_argument("UnscentedTransform: beta must be non-negative");
+            }
+
+            const double n = static_cast<double>(state_dim);
+            const double lambda = params.alpha * params.alpha * (n + params.kappa) - n;
+            if ((n + lambda) <= 0.0) {
+                throw std::invalid_argument(
+                    "UnscentedTransform: n + lambda must be positive (check alpha/kappa)"
+                );
+            }
+
+            return lambda;
+        }
     }
 
-    const double n = static_cast<double>(state_dim);
-    const double lambda = params.alpha * params.alpha * (n + params.kappa) - n;
-    if ((n + lambda) <= 0.0) {
-        throw std::invalid_argument(
-            "UnscentedTransform: n + lambda must be positive (check alpha/kappa)"
-        );
-    }
-
-    return lambda;
+    throw std::invalid_argument("UnscentedTransform: unknown sigma-point scheme");
 }
 
 auto UnscentedTransform::compute_weights(
@@ -43,19 +126,62 @@ auto UnscentedTransform::compute_weights(
     const UnscentedTransformParameters& params
 ) -> Weights {
     const double lambda = validate_parameters(state_dim, params);
-    const int sigma_count = 2 * state_dim + 1;
-    const double scaling = static_cast<double>(state_dim) + lambda;
 
     Weights weights;
     weights.lambda = lambda;
-    weights.mean = Eigen::VectorXd::Constant(sigma_count, 0.5 / scaling);
-    weights.covariance = Eigen::VectorXd::Constant(sigma_count, 0.5 / scaling);
 
-    weights.mean(0) = lambda / scaling;
-    weights.covariance(0) =
-        weights.mean(0) + (1.0 - params.alpha * params.alpha + params.beta);
+    switch (params.sigma_point_scheme) {
+        case UnscentedSigmaPointScheme::JulierSphericalSimplex: {
+            const int sigma_count = state_dim + 2;
+            const double off_center_weight =
+                (1.0 - params.simplex_weight_0) / static_cast<double>(state_dim + 1);
 
-    return weights;
+            weights.mean = Eigen::VectorXd::Constant(sigma_count, off_center_weight);
+            weights.covariance = Eigen::VectorXd::Constant(sigma_count, off_center_weight);
+            weights.mean(0) = params.simplex_weight_0;
+            weights.covariance(0) = params.simplex_weight_0;
+            return weights;
+        }
+        case UnscentedSigmaPointScheme::ScaledSymmetric: {
+            const int sigma_count = 2 * state_dim + 1;
+            const double scaling = static_cast<double>(state_dim) + lambda;
+
+            weights.mean = Eigen::VectorXd::Constant(sigma_count, 0.5 / scaling);
+            weights.covariance = Eigen::VectorXd::Constant(sigma_count, 0.5 / scaling);
+
+            weights.mean(0) = lambda / scaling;
+            weights.covariance(0) =
+                weights.mean(0) + (1.0 - params.alpha * params.alpha + params.beta);
+            return weights;
+        }
+    }
+
+    throw std::invalid_argument("UnscentedTransform: unknown sigma-point scheme");
+}
+
+auto UnscentedTransform::generate_unit_sigma_points(
+    int state_dim,
+    const UnscentedTransformParameters& params
+) -> std::vector<Eigen::VectorXd> {
+    const double lambda = validate_parameters(state_dim, params);
+
+    switch (params.sigma_point_scheme) {
+        case UnscentedSigmaPointScheme::JulierSphericalSimplex: {
+            const auto weights = compute_weights(state_dim, params);
+            const double off_center_weight = weights.mean(1);
+            return generate_spherical_simplex_unit_sigma_points_impl(
+                state_dim,
+                off_center_weight
+            );
+        }
+        case UnscentedSigmaPointScheme::ScaledSymmetric:
+            return generate_scaled_symmetric_unit_sigma_points_impl(
+                state_dim,
+                std::sqrt(static_cast<double>(state_dim) + lambda)
+            );
+    }
+
+    throw std::invalid_argument("UnscentedTransform: unknown sigma-point scheme");
 }
 
 auto UnscentedTransform::compute_cholesky_factor(const Eigen::MatrixXd& covariance)
@@ -100,18 +226,13 @@ auto UnscentedTransform::generate_sigma_points(
         );
     }
 
-    const double lambda = validate_parameters(n, params);
-    const double scaling = static_cast<double>(n) + lambda;
+    const Eigen::MatrixXd L = compute_cholesky_factor(covariance);
+    const auto unit_sigma_points = generate_unit_sigma_points(n, params);
 
-    const Eigen::MatrixXd L = compute_cholesky_factor(scaling * covariance);
-
-    std::vector<Eigen::VectorXd> sigma_points(static_cast<std::size_t>(2 * n + 1));
-    sigma_points[0] = mean;
-
-    for (int i = 0; i < n; ++i) {
-        const Eigen::VectorXd offset = L.col(i);
-        sigma_points[static_cast<std::size_t>(i + 1)] = mean + offset;
-        sigma_points[static_cast<std::size_t>(i + 1 + n)] = mean - offset;
+    std::vector<Eigen::VectorXd> sigma_points;
+    sigma_points.reserve(unit_sigma_points.size());
+    for (const Eigen::VectorXd& unit_sigma : unit_sigma_points) {
+        sigma_points.push_back(mean + L * unit_sigma);
     }
 
     return sigma_points;

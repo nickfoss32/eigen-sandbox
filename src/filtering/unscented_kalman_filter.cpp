@@ -83,44 +83,65 @@ void UnscentedKalmanFilter::predict(double dt) {
 
     x_ = predicted.moments.mean;
     P_ = predicted.moments.covariance;
+    predicted_sigma_points_ = predicted.transformed_sigma_points;
+    predicted_sigma_weights_ = predicted.weights;
+    has_predicted_sigma_points_ = true;
     current_time_ = t_end;
+}
+
+auto UnscentedKalmanFilter::get_state_sigma_point_set() const -> StateSigmaPointSet {
+    if (has_predicted_sigma_points_) {
+        return StateSigmaPointSet{predicted_sigma_points_, predicted_sigma_weights_};
+    }
+
+    StateSigmaPointSet sigma_point_set;
+    sigma_point_set.weights = UnscentedTransform::compute_weights(x_.size(), ut_parameters_);
+    sigma_point_set.sigma_points = UnscentedTransform::generate_sigma_points(
+        x_,
+        P_,
+        ut_parameters_
+    );
+    return sigma_point_set;
 }
 
 auto UnscentedKalmanFilter::predict_measurement_distribution(
     const common::Measurement& measurement
 ) const -> MeasurementPrediction {
-    const auto transformed = UnscentedTransform::transform_distribution(
-        x_,
-        P_,
-        [this, &measurement](const Eigen::VectorXd& sigma_state) {
-            sensor::SensorContext ctx;
-            ctx.state = sigma_state;
-            ctx.time = measurement.time;
-            ctx.sensor_position = measurement.sensor_position;
-            ctx.sensor_orientation = measurement.sensor_orientation;
-            return sensor_model_->compute_measurement(ctx);
-        },
-        measurement.R,
-        ut_parameters_
+    const StateSigmaPointSet sigma_point_set = get_state_sigma_point_set();
+
+    MeasurementPrediction prediction;
+    prediction.sigma_states = sigma_point_set.sigma_points;
+    prediction.sigma_measurements.reserve(prediction.sigma_states.size());
+
+    for (const Eigen::VectorXd& sigma_state : prediction.sigma_states) {
+        sensor::SensorContext ctx;
+        ctx.state = sigma_state;
+        ctx.time = measurement.time;
+        ctx.sensor_position = measurement.sensor_position;
+        ctx.sensor_orientation = measurement.sensor_orientation;
+        prediction.sigma_measurements.push_back(sensor_model_->compute_measurement(ctx));
+    }
+
+    const auto measurement_moments = UnscentedTransform::recover_gaussian(
+        prediction.sigma_measurements,
+        sigma_point_set.weights,
+        measurement.R
     );
 
-    if (transformed.moments.mean.size() != measurement.z.size()) {
+    if (measurement_moments.mean.size() != measurement.z.size()) {
         throw std::invalid_argument(
             "UKF: measurement dimension does not match sensor output dimension"
         );
     }
 
-    MeasurementPrediction prediction;
-    prediction.sigma_states = transformed.source_sigma_points;
-    prediction.sigma_measurements = transformed.transformed_sigma_points;
-    prediction.measurement_mean = transformed.moments.mean;
-    prediction.innovation_covariance = transformed.moments.covariance;
+    prediction.measurement_mean = measurement_moments.mean;
+    prediction.innovation_covariance = measurement_moments.covariance;
     prediction.state_measurement_cross_covariance = UnscentedTransform::compute_cross_covariance(
         prediction.sigma_states,
         x_,
         prediction.sigma_measurements,
         prediction.measurement_mean,
-        transformed.weights
+        sigma_point_set.weights
     );
 
     return prediction;
@@ -149,6 +170,11 @@ void UnscentedKalmanFilter::update(const common::Measurement& measurement) {
     P_ = 0.5 * (P_ + P_.transpose());
 
     current_time_ = measurement.time;
+    predicted_sigma_points_.clear();
+    predicted_sigma_weights_.mean.resize(0);
+    predicted_sigma_weights_.covariance.resize(0);
+    predicted_sigma_weights_.lambda = 0.0;
+    has_predicted_sigma_points_ = false;
 }
 
 double UnscentedKalmanFilter::get_innovation_likelihood(

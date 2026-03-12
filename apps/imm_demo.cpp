@@ -1,13 +1,17 @@
 #include <Eigen/Dense>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cctype>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <numbers>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -20,16 +24,54 @@
 #include <dynamics/point_mass_dynamics.hpp>
 #include <estimation/imm.hpp>
 #include <filtering/extended_kalman_filter.hpp>
+#include <filtering/unscented_kalman_filter.hpp>
 #include <integrator/rk4.hpp>
 #include <propagator/numerical_propagator.hpp>
 #include <sensor/space_based_optical_sensor_model.hpp>
 
 namespace po = boost::program_options;
 
+namespace {
+
+enum class FilterKind {
+    ExtendedKalman,
+    UnscentedKalman
+};
+
+auto to_filter_kind(std::string filter_name) -> FilterKind {
+    std::transform(
+        filter_name.begin(),
+        filter_name.end(),
+        filter_name.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); }
+    );
+
+    if (filter_name == "ekf") {
+        return FilterKind::ExtendedKalman;
+    }
+    if (filter_name == "ukf") {
+        return FilterKind::UnscentedKalman;
+    }
+
+    throw std::invalid_argument("Filter must be either 'ekf' or 'ukf'");
+}
+
+auto make_simplex_params() -> filtering::UnscentedTransformParameters {
+    filtering::UnscentedTransformParameters params;
+    params.sigma_point_scheme =
+        filtering::UnscentedSigmaPointScheme::JulierSphericalSimplex;
+    params.simplex_weight_0 = 0.5;
+    return params;
+}
+
+} // namespace
+
 int main(int argc, char* argv[]) {
     po::options_description desc("Allowed options");
     desc.add_options()
         ("help,h", "Produce help message")
+        ("filter,f", po::value<std::string>()->default_value("ukf"),
+            "Filter type: ekf or ukf (default: ukf)")
         ("output,o", po::value<std::string>()->default_value("imm_demo.json"),
             "Output JSON file with IMM trajectory data");
 
@@ -42,6 +84,14 @@ int main(int argc, char* argv[]) {
     }
 
     po::notify(vm);
+
+    FilterKind filter_kind = FilterKind::UnscentedKalman;
+    try {
+        filter_kind = to_filter_kind(vm["filter"].as<std::string>());
+    } catch (const std::invalid_argument& ex) {
+        std::cerr << ex.what() << '\n' << desc << '\n';
+        return 1;
+    }
     const std::string output_file = vm["output"].as<std::string>();
 
     constexpr double kEarthRadiusMeters = 6378137.0;
@@ -177,7 +227,9 @@ int main(int argc, char* argv[]) {
         model_j2_drag_dynamics, integrator, kIntegratorStepSeconds
     );
 
-    filtering::ExtendedKalmanFilter::ProcessNoiseFunction q_two_body =
+    using ProcessNoiseFunction = std::function<Eigen::MatrixXd(double)>;
+
+    ProcessNoiseFunction q_two_body =
         [](double dt) {
             Eigen::MatrixXd Q = Eigen::MatrixXd::Zero(6, 6);
             Q.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * (4000.0 * dt);
@@ -185,7 +237,7 @@ int main(int argc, char* argv[]) {
             return Q;
         };
 
-    filtering::ExtendedKalmanFilter::ProcessNoiseFunction q_j2 =
+    ProcessNoiseFunction q_j2 =
         [](double dt) {
             Eigen::MatrixXd Q = Eigen::MatrixXd::Zero(6, 6);
             Q.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * (2000.0 * dt);
@@ -193,7 +245,7 @@ int main(int argc, char* argv[]) {
             return Q;
         };
 
-    filtering::ExtendedKalmanFilter::ProcessNoiseFunction q_j2_drag =
+    ProcessNoiseFunction q_j2_drag =
         [](double dt) {
             Eigen::MatrixXd Q = Eigen::MatrixXd::Zero(6, 6);
             Q.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * (1000.0 * dt);
@@ -201,31 +253,36 @@ int main(int argc, char* argv[]) {
             return Q;
         };
 
+    const auto ut_params = make_simplex_params();
+    auto make_filter =
+        [&](const std::shared_ptr<propagator::NumericalPropagator>& propagator,
+            const ProcessNoiseFunction& process_noise) -> std::unique_ptr<filtering::IKalmanFilter> {
+        if (filter_kind == FilterKind::UnscentedKalman) {
+            return std::make_unique<filtering::UnscentedKalmanFilter>(
+                initial_estimate,
+                initial_covariance,
+                propagator,
+                sensor_model,
+                process_noise,
+                0.0,
+                ut_params
+            );
+        }
+
+        return std::make_unique<filtering::ExtendedKalmanFilter>(
+            initial_estimate,
+            initial_covariance,
+            propagator,
+            sensor_model,
+            process_noise,
+            0.0
+        );
+    };
+
     std::vector<std::unique_ptr<filtering::IKalmanFilter>> filters;
-    filters.push_back(std::make_unique<filtering::ExtendedKalmanFilter>(
-        initial_estimate,
-        initial_covariance,
-        model_two_body_propagator,
-        sensor_model,
-        q_two_body,
-        0.0
-    ));
-    filters.push_back(std::make_unique<filtering::ExtendedKalmanFilter>(
-        initial_estimate,
-        initial_covariance,
-        model_j2_propagator,
-        sensor_model,
-        q_j2,
-        0.0
-    ));
-    filters.push_back(std::make_unique<filtering::ExtendedKalmanFilter>(
-        initial_estimate,
-        initial_covariance,
-        model_j2_drag_propagator,
-        sensor_model,
-        q_j2_drag,
-        0.0
-    ));
+    filters.push_back(make_filter(model_two_body_propagator, q_two_body));
+    filters.push_back(make_filter(model_j2_propagator, q_j2));
+    filters.push_back(make_filter(model_j2_drag_propagator, q_j2_drag));
 
     Eigen::VectorXd initial_mode_probs(3);
     initial_mode_probs << 0.80, 0.15, 0.05;
@@ -282,7 +339,13 @@ int main(int argc, char* argv[]) {
         model_points[static_cast<std::size_t>(i)].push_back(std::move(point));
     }
 
+    const std::string filter_label =
+        filter_kind == FilterKind::UnscentedKalman
+            ? "UKF (Julier spherical simplex)"
+            : "EKF";
+
     std::cout << "IMM demo with orbital force models (3 model filters)\n";
+    std::cout << "Filter: " << filter_label << '\n';
     std::cout << "Measurements: space-based optical [RA, Dec] in ECI\n";
     std::cout << "  model 0: Two-body gravity\n";
     std::cout << "  model 1: J2 gravity\n";
@@ -400,6 +463,7 @@ int main(int argc, char* argv[]) {
     data_json["summary"]["simulation"]["truth_model"] = "J2PlusDrag";
     data_json["summary"]["simulation"]["measurement_type"] = "SpaceBasedOptical[RA,Dec]";
     data_json["summary"]["imm"]["models"] = models_summary;
+    data_json["summary"]["imm"]["filter"] = filter_label;
     data_json["summary"]["imm"]["initial_model_probabilities"] = {
         initial_mode_probs(0), initial_mode_probs(1), initial_mode_probs(2)
     };
@@ -414,6 +478,10 @@ int main(int argc, char* argv[]) {
     data_json["summary"]["imm"]["most_likely_model"] = most_likely;
     data_json["summary"]["imm"]["most_likely_model_name"] =
         model_names.at(static_cast<std::size_t>(most_likely));
+    if (filter_kind == FilterKind::UnscentedKalman) {
+        data_json["summary"]["imm"]["sigma_point_scheme"] = "JulierSphericalSimplex";
+        data_json["summary"]["imm"]["simplex_weight_0"] = ut_params.simplex_weight_0;
+    }
 
     std::ofstream out_file(output_file);
     if (!out_file.is_open()) {

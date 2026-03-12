@@ -7,17 +7,34 @@
 
 namespace filtering {
 
+/// @brief Sigma-point construction method used by the Unscented Transform.
+enum class UnscentedSigmaPointScheme {
+    /// @brief Julier's spherical-simplex sigma set with n+2 sigma points.
+    JulierSphericalSimplex,
+
+    /// @brief Classic scaled symmetric sigma set with 2n+1 sigma points.
+    ScaledSymmetric
+};
+
 /// @brief Tuning parameters for the Unscented Transform.
-///
-/// Parameters follow standard UKF notation where lambda = alpha^2 (n + kappa) - n.
 struct UnscentedTransformParameters {
-    /// @brief Primary spread parameter controlling sigma-point dispersion.
+    /// @brief Sigma-point construction scheme.
+    UnscentedSigmaPointScheme sigma_point_scheme =
+        UnscentedSigmaPointScheme::JulierSphericalSimplex;
+
+    /// @brief Central sigma-point weight for Julier's spherical-simplex set.
+    ///
+    /// Must satisfy 0 <= simplex_weight_0 < 1. The remaining n+1 sigma points
+    /// each receive weight (1 - simplex_weight_0) / (n + 1).
+    double simplex_weight_0 = 0.5;
+
+    /// @brief Primary spread parameter for the scaled symmetric sigma set.
     double alpha = 0.3;
 
-    /// @brief Prior knowledge parameter (2.0 is typical for Gaussian priors).
+    /// @brief Prior knowledge parameter for the scaled symmetric sigma set.
     double beta = 2.0;
 
-    /// @brief Secondary spread parameter used in lambda computation.
+    /// @brief Secondary spread parameter for the scaled symmetric sigma set.
     double kappa = 0.0;
 };
 
@@ -38,7 +55,7 @@ public:
         /// @brief Covariance weights for each sigma point.
         Eigen::VectorXd covariance;
 
-        /// @brief Lambda value derived from alpha/kappa and state dimension.
+        /// @brief Lambda for the scaled symmetric scheme (0 for spherical simplex).
         double lambda = 0.0;
     };
 
@@ -79,7 +96,7 @@ public:
     /// @param mean Mean vector of the Gaussian.
     /// @param covariance Covariance matrix of the Gaussian.
     /// @param params Unscented transform tuning parameters.
-    /// @return Sigma points with size 2n+1.
+    /// @return Sigma points with scheme-dependent size (n+2 or 2n+1).
     static auto generate_sigma_points(
         const Eigen::VectorXd& mean,
         const Eigen::MatrixXd& covariance,
@@ -143,6 +160,15 @@ private:
         int state_dim,
         const UnscentedTransformParameters& params
     ) -> double;
+
+    /// @brief Generate unit sigma points for the selected sigma-point scheme.
+    /// @param state_dim Dimension of the state space.
+    /// @param params Unscented transform tuning parameters.
+    /// @return Unit sigma points whose weighted covariance is identity.
+    static auto generate_unit_sigma_points(
+        int state_dim,
+        const UnscentedTransformParameters& params
+    ) -> std::vector<Eigen::VectorXd>;
 
     /// @brief Compute a numerically robust Cholesky factor.
     /// @param covariance Symmetric covariance matrix.

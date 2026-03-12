@@ -15,6 +15,79 @@
 #include <random>
 #include <vector>
 
+namespace {
+
+auto make_simplex_params() -> filtering::UnscentedTransformParameters {
+    filtering::UnscentedTransformParameters params;
+    params.sigma_point_scheme =
+        filtering::UnscentedSigmaPointScheme::JulierSphericalSimplex;
+    params.simplex_weight_0 = 0.5;
+    return params;
+}
+
+class NonlinearProcessPropagator : public propagator::IPropagator {
+public:
+    auto propagate(double t0, const Eigen::VectorXd& initial_state, double tf) const
+        -> std::vector<std::pair<double, Eigen::VectorXd>> override {
+        const double dt = tf - t0;
+        Eigen::VectorXd propagated(2);
+        propagated(0) =
+            initial_state(0) * initial_state(0) + 0.35 * initial_state(1) + 0.1 * dt;
+        propagated(1) = initial_state(1) + 0.4 * initial_state(0) * initial_state(1);
+        return {{t0, initial_state}, {tf, propagated}};
+    }
+
+    auto compute_transition_jacobian(double, const Eigen::VectorXd& state, double) const
+        -> Eigen::MatrixXd override {
+        Eigen::MatrixXd F = Eigen::MatrixXd::Identity(2, 2);
+        F(0, 0) = 2.0 * state(0);
+        F(0, 1) = 0.35;
+        F(1, 0) = 0.4 * state(1);
+        F(1, 1) = 1.0 + 0.4 * state(0);
+        return F;
+    }
+};
+
+class NonlinearMeasurementModel : public sensor::ISensorModel {
+public:
+    auto compute_measurement(const sensor::SensorContext& ctx) const -> Eigen::VectorXd override {
+        Eigen::VectorXd measurement(1);
+        measurement(0) =
+            ctx.state(0) * ctx.state(0) + 0.25 * ctx.state(0) * ctx.state(1);
+        return measurement;
+    }
+
+    auto get_noise_covariance() const -> Eigen::MatrixXd override {
+        Eigen::MatrixXd R(1, 1);
+        R(0, 0) = 0.05;
+        return R;
+    }
+
+    auto compute_jacobian(const sensor::SensorContext& ctx) const -> Eigen::MatrixXd override {
+        Eigen::MatrixXd H = Eigen::MatrixXd::Zero(1, ctx.state.size());
+        H(0, 0) = 2.0 * ctx.state(0) + 0.25 * ctx.state(1);
+        H(0, 1) = 0.25 * ctx.state(0);
+        return H;
+    }
+
+    int get_dimension() const override { return 1; }
+};
+
+auto propagate_sigma_state(const Eigen::VectorXd& state) -> Eigen::VectorXd {
+    Eigen::VectorXd propagated(2);
+    propagated(0) = state(0) * state(0) + 0.35 * state(1) + 0.1;
+    propagated(1) = state(1) + 0.4 * state(0) * state(1);
+    return propagated;
+}
+
+auto measure_sigma_state(const Eigen::VectorXd& state) -> Eigen::VectorXd {
+    Eigen::VectorXd measurement(1);
+    measurement(0) = state(0) * state(0) + 0.25 * state(0) * state(1);
+    return measurement;
+}
+
+} // namespace
+
 class UnscentedKalmanFilterTest : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -54,9 +127,7 @@ protected:
             return Q;
         };
 
-        ut_params_.alpha = 0.3;
-        ut_params_.beta = 2.0;
-        ut_params_.kappa = 0.0;
+        ut_params_ = make_simplex_params();
     }
 
     Eigen::VectorXd x0_;
@@ -185,4 +256,81 @@ TEST_F(UnscentedKalmanFilterTest, TracksOrbitWithNoisyRadarMeasurements) {
 
     EXPECT_LT(pos_err, 5000.0);
     EXPECT_LT(vel_err, 80.0);
+}
+
+TEST(UnscentedKalmanFilterRegressionTest, UpdateReusesPredictedSigmaPoints) {
+    Eigen::VectorXd x0(2);
+    x0 << 1.1, -0.7;
+
+    Eigen::MatrixXd P0(2, 2);
+    P0 << 0.45, 0.08,
+          0.08, 0.30;
+
+    const auto ut_params = make_simplex_params();
+    auto propagator = std::make_shared<NonlinearProcessPropagator>();
+    auto sensor_model = std::make_shared<NonlinearMeasurementModel>();
+    auto Q_func = [](double) {
+        return Eigen::MatrixXd::Zero(2, 2);
+    };
+
+    filtering::UnscentedKalmanFilter ukf(
+        x0,
+        P0,
+        propagator,
+        sensor_model,
+        Q_func,
+        0.0,
+        ut_params
+    );
+
+    ukf.predict(1.0);
+
+    Eigen::VectorXd z(1);
+    z << 1.35;
+    common::Measurement measurement(z, sensor_model->get_noise_covariance(), 1.0);
+    ukf.update(measurement);
+
+    const auto predicted = filtering::UnscentedTransform::transform_distribution(
+        x0,
+        P0,
+        propagate_sigma_state,
+        Eigen::MatrixXd::Zero(2, 2),
+        ut_params
+    );
+
+    std::vector<Eigen::VectorXd> sigma_measurements;
+    sigma_measurements.reserve(predicted.transformed_sigma_points.size());
+    for (const Eigen::VectorXd& sigma_state : predicted.transformed_sigma_points) {
+        sigma_measurements.push_back(measure_sigma_state(sigma_state));
+    }
+
+    const auto measurement_moments = filtering::UnscentedTransform::recover_gaussian(
+        sigma_measurements,
+        predicted.weights,
+        sensor_model->get_noise_covariance()
+    );
+    const Eigen::MatrixXd cross_covariance =
+        filtering::UnscentedTransform::compute_cross_covariance(
+            predicted.transformed_sigma_points,
+            predicted.moments.mean,
+            sigma_measurements,
+            measurement_moments.mean,
+            predicted.weights
+        );
+
+    const Eigen::MatrixXd kalman_gain =
+        cross_covariance * measurement_moments.covariance.inverse();
+    const Eigen::VectorXd expected_state =
+        predicted.moments.mean + kalman_gain * (z - measurement_moments.mean);
+    const Eigen::MatrixXd expected_covariance =
+        0.5 * (
+            predicted.moments.covariance -
+            kalman_gain * measurement_moments.covariance * kalman_gain.transpose() +
+            (predicted.moments.covariance -
+             kalman_gain * measurement_moments.covariance * kalman_gain.transpose()
+            ).transpose()
+        );
+
+    EXPECT_TRUE(ukf.get_state().isApprox(expected_state, 1e-10));
+    EXPECT_TRUE(ukf.get_covariance().isApprox(expected_covariance, 1e-10));
 }
