@@ -151,6 +151,76 @@ protected:
         return estimation::IMM(std::move(filters), initial_mode_probs, transition);
     }
 
+    auto make_mixed_imm() const -> estimation::IMM {
+        auto integrator = std::make_shared<integrator::RK4Integrator>();
+
+        auto model_cv_dynamics = std::make_shared<dynamics::PointMassDynamics>(
+            std::vector<std::shared_ptr<dynamics::IForce>>{}
+        );
+        auto model_ca_dynamics = std::make_shared<dynamics::PointMassDynamics>(
+            std::vector<std::shared_ptr<dynamics::IForce>>{
+                std::make_shared<dynamics::ConstantAccelerationForce>(
+                    Eigen::Vector3d(-1.2, 0.5, 0.0)
+                )
+            }
+        );
+        auto model_ct_dynamics = std::make_shared<dynamics::PointMassDynamics>(
+            std::vector<std::shared_ptr<dynamics::IForce>>{
+                std::make_shared<dynamics::CoordinatedTurnForce>(0.028)
+            }
+        );
+
+        auto model_cv_propagator = std::make_shared<propagator::NumericalPropagator>(
+            model_cv_dynamics, integrator, kIntegratorStepSeconds
+        );
+        auto model_ca_propagator = std::make_shared<propagator::NumericalPropagator>(
+            model_ca_dynamics, integrator, kIntegratorStepSeconds
+        );
+        auto model_ct_propagator = std::make_shared<propagator::NumericalPropagator>(
+            model_ct_dynamics, integrator, kIntegratorStepSeconds
+        );
+
+        const auto ut_params = make_simplex_params();
+
+        std::vector<std::unique_ptr<filtering::IKalmanFilter>> filters;
+        filters.push_back(std::make_unique<filtering::ExtendedKalmanFilter>(
+            initial_estimate_,
+            initial_covariance_,
+            model_cv_propagator,
+            sensor_model_,
+            make_process_noise(180.0, 4.0),
+            0.0
+        ));
+        filters.push_back(std::make_unique<filtering::UnscentedKalmanFilter>(
+            initial_estimate_,
+            initial_covariance_,
+            model_ca_propagator,
+            sensor_model_,
+            make_process_noise(70.0, 1.8),
+            0.0,
+            ut_params
+        ));
+        filters.push_back(std::make_unique<filtering::UnscentedKalmanFilter>(
+            initial_estimate_,
+            initial_covariance_,
+            model_ct_propagator,
+            sensor_model_,
+            make_process_noise(35.0, 0.7),
+            0.0,
+            ut_params
+        ));
+
+        Eigen::VectorXd initial_mode_probs(3);
+        initial_mode_probs << (1.0 / 3.0), (1.0 / 3.0), (1.0 / 3.0);
+
+        Eigen::MatrixXd transition(3, 3);
+        transition << 0.95, 0.025, 0.025,
+                      0.025, 0.95, 0.025,
+                      0.025, 0.025, 0.95;
+
+        return estimation::IMM(std::move(filters), initial_mode_probs, transition);
+    }
+
     auto make_measurement(std::mt19937& rng) -> common::Measurement {
         auto truth_traj = truth_propagator_->propagate(current_time_, truth_state_, current_time_ + kDtSeconds);
         truth_state_ = truth_traj.back().second;
@@ -274,6 +344,32 @@ TEST_F(IMMTest, UKFCombinedEstimateTracksTruthReasonably) {
 
     EXPECT_LT(pos_err, 65.0);
     EXPECT_LT(vel_err, 10.0);
+}
+
+TEST_F(IMMTest, MixedEkfUkfHypothesesStayNormalizedAndTrackTruth) {
+    auto imm = make_mixed_imm();
+    std::mt19937 rng(42);
+
+    for (int k = 0; k < 70; ++k) {
+        const auto measurement = make_measurement(rng);
+        imm.predict(kDtSeconds);
+        imm.update(measurement);
+    }
+
+    const Eigen::VectorXd mu = imm.get_model_probabilities();
+    ASSERT_EQ(mu.size(), 3);
+    EXPECT_TRUE(mu.allFinite());
+    EXPECT_NEAR(mu.sum(), 1.0, 1e-9);
+    EXPECT_EQ(imm.get_most_likely_model(), 2);
+    EXPECT_GT(mu(2), mu(0));
+    EXPECT_GT(mu(2), mu(1));
+
+    const Eigen::VectorXd estimate = imm.get_state();
+    const double pos_err = (estimate.head<3>() - truth_state_.head<3>()).norm();
+    const double vel_err = (estimate.tail<3>() - truth_state_.tail<3>()).norm();
+
+    EXPECT_LT(pos_err, 60.0);
+    EXPECT_LT(vel_err, 9.0);
 }
 
 } // namespace

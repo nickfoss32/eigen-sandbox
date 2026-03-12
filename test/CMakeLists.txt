@@ -27,6 +27,7 @@ add_executable(dynamics_tests
     test_dynamics_gravity.cpp
     test_dynamics_point_mass_dynamics.cpp
     test_dynamics_rigid_body_dynamics.cpp
+    test_dynamics_time_window_force.cpp
 )
 target_link_libraries(dynamics_tests
     PRIVATE
@@ -106,6 +107,7 @@ gtest_discover_tests(propagator_tests)
 # Sensor tests
 add_executable(sensor_tests
     test_sensor_radar_sensor_model.cpp
+    test_sensor_space_based_azel_sensor_model.cpp
     test_sensor_space_based_optical_sensor_model.cpp
 )
 target_link_libraries(sensor_tests

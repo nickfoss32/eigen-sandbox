@@ -8,6 +8,7 @@ add_library(dynamics
     forces/coordinated_turn_force.cpp
     forces/fictitious_forces.cpp
     forces/gravity.cpp
+    forces/time_window_force.cpp
     point_mass_dynamics.cpp
     rigid_body_dynamics.cpp
     torques/aerodynamic_torque.cpp
