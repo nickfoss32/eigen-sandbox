@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <numbers>
+#include <optional>
 #include <random>
 #include <string>
 #include <utility>
@@ -149,10 +150,28 @@ struct RecordedSample {
     std::vector<common::Measurement> measurements;
 };
 
+struct InitializationSeed {
+    std::string mode = "NominalPrior";
+    std::string detail = "Fixed-offset nominal prior.";
+    double initial_time_seconds = 0.0;
+    int consumed_sample_count = 0;
+    int epochs_used = 0;
+    int sensors_used_per_epoch = 0;
+    double position_sigma_m = 0.0;
+    double velocity_sigma_mps = 0.0;
+    double first_epoch_triangulation_residual_m = 0.0;
+    double second_epoch_triangulation_residual_m = 0.0;
+    Eigen::VectorXd initial_estimate;
+    Eigen::MatrixXd initial_covariance;
+};
+
 struct ScenarioTrace {
     Eigen::VectorXd initial_truth_state;
     Eigen::VectorXd initial_estimate;
     Eigen::MatrixXd initial_covariance;
+    double initial_time_seconds = 0.0;
+    int first_update_sample_index = 0;
+    InitializationSeed initialization;
     nlohmann::json truth_points = nlohmann::json::array();
     nlohmann::json measurement_points = nlohmann::json::array();
     std::vector<RecordedSample> samples;
@@ -321,6 +340,7 @@ auto make_ekf_model_with_process_noise(
     std::string motion_model,
     std::string description,
     double sigma_accel,
+    double initial_time_seconds,
     filtering::ExtendedKalmanFilter::ProcessNoiseFunction process_noise_function
 ) -> ModelBuild {
     std::unique_ptr<filtering::IKalmanFilter> filter =
@@ -330,7 +350,7 @@ auto make_ekf_model_with_process_noise(
             propagator,
             sensor_model,
             std::move(process_noise_function),
-            0.0
+            initial_time_seconds
         );
 
     return {
@@ -354,6 +374,7 @@ auto make_ukf_model_with_process_noise(
     std::string motion_model,
     std::string description,
     double sigma_accel,
+    double initial_time_seconds,
     filtering::UnscentedKalmanFilter::ProcessNoiseFunction process_noise_function
 ) -> ModelBuild {
     std::unique_ptr<filtering::IKalmanFilter> filter =
@@ -363,7 +384,7 @@ auto make_ukf_model_with_process_noise(
             propagator,
             sensor_model,
             std::move(process_noise_function),
-            0.0
+            initial_time_seconds
         );
 
     return {
@@ -386,7 +407,8 @@ auto make_ekf_model(
     std::string name,
     std::string motion_model,
     std::string description,
-    double sigma_accel
+    double sigma_accel,
+    double initial_time_seconds
 ) -> ModelBuild {
     return make_ekf_model_with_process_noise(
         initial_state,
@@ -397,6 +419,7 @@ auto make_ekf_model(
         std::move(motion_model),
         std::move(description),
         sigma_accel,
+        initial_time_seconds,
         make_white_acceleration_process_noise(sigma_accel)
     );
 }
@@ -409,7 +432,8 @@ auto make_ukf_model(
     std::string name,
     std::string motion_model,
     std::string description,
-    double sigma_accel
+    double sigma_accel,
+    double initial_time_seconds
 ) -> ModelBuild {
     return make_ukf_model_with_process_noise(
         initial_state,
@@ -420,6 +444,7 @@ auto make_ukf_model(
         std::move(motion_model),
         std::move(description),
         sigma_accel,
+        initial_time_seconds,
         make_white_acceleration_process_noise(sigma_accel)
     );
 }
@@ -871,11 +896,176 @@ auto make_sensor_platform(
     return platform;
 }
 
+struct TriangulatedPosition {
+    Eigen::Vector3d position = Eigen::Vector3d::Zero();
+    double rms_cross_track_residual_m = 0.0;
+    int sensors_used = 0;
+};
+
+auto azel_measurement_to_world_los(const common::Measurement& measurement)
+    -> std::optional<Eigen::Vector3d> {
+    if (measurement.z.size() < 2 || !measurement.sensor_position.allFinite()) {
+        return std::nullopt;
+    }
+
+    if (!measurement.sensor_orientation.coeffs().allFinite() ||
+        measurement.sensor_orientation.norm() <= 0.0) {
+        return std::nullopt;
+    }
+
+    const double azimuth = measurement.z(0);
+    const double elevation = measurement.z(1);
+    const Eigen::Vector3d los_sensor(
+        std::cos(elevation) * std::cos(azimuth),
+        std::cos(elevation) * std::sin(azimuth),
+        std::sin(elevation)
+    );
+
+    const Eigen::Quaterniond q_sensor_to_world = measurement.sensor_orientation.normalized();
+    return (q_sensor_to_world * los_sensor).normalized();
+}
+
+auto triangulate_position_from_measurements(const std::vector<common::Measurement>& measurements)
+    -> std::optional<TriangulatedPosition> {
+    Eigen::Matrix3d normal_matrix = Eigen::Matrix3d::Zero();
+    Eigen::Vector3d rhs = Eigen::Vector3d::Zero();
+    std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> sensor_lines;
+    sensor_lines.reserve(measurements.size());
+
+    for (const auto& measurement : measurements) {
+        const auto los_world = azel_measurement_to_world_los(measurement);
+        if (!los_world.has_value()) {
+            continue;
+        }
+
+        const Eigen::Vector3d unit_los = los_world.value();
+        const Eigen::Matrix3d projector =
+            Eigen::Matrix3d::Identity() - unit_los * unit_los.transpose();
+
+        normal_matrix += projector;
+        rhs += projector * measurement.sensor_position;
+        sensor_lines.emplace_back(measurement.sensor_position, unit_los);
+    }
+
+    if (sensor_lines.size() < 2) {
+        return std::nullopt;
+    }
+
+    Eigen::ColPivHouseholderQR<Eigen::Matrix3d> qr(normal_matrix);
+    if (qr.rank() < 3) {
+        return std::nullopt;
+    }
+
+    const Eigen::Vector3d position = qr.solve(rhs);
+    if (!position.allFinite()) {
+        return std::nullopt;
+    }
+
+    double residual_sq_sum = 0.0;
+    for (const auto& [sensor_position, unit_los] : sensor_lines) {
+        const Eigen::Vector3d miss_vector =
+            (Eigen::Matrix3d::Identity() - unit_los * unit_los.transpose()) *
+            (position - sensor_position);
+        residual_sq_sum += miss_vector.squaredNorm();
+    }
+
+    TriangulatedPosition solution;
+    solution.position = position;
+    solution.rms_cross_track_residual_m = std::sqrt(
+        residual_sq_sum / static_cast<double>(sensor_lines.size())
+    );
+    solution.sensors_used = static_cast<int>(sensor_lines.size());
+    return solution;
+}
+
+auto make_initialization_seed(
+    const ScenarioTrace& trace,
+    const Eigen::VectorXd& fallback_initial_estimate,
+    const Eigen::MatrixXd& fallback_initial_covariance
+) -> InitializationSeed {
+    InitializationSeed seed;
+    seed.initial_estimate = fallback_initial_estimate;
+    seed.initial_covariance = fallback_initial_covariance;
+
+    if (trace.samples.size() < 2) {
+        seed.detail =
+            "Fixed-offset nominal prior (bootstrap unavailable: fewer than 2 measurement epochs).";
+        return seed;
+    }
+
+    const auto first_position = triangulate_position_from_measurements(
+        trace.samples[0].measurements
+    );
+    const auto second_position = triangulate_position_from_measurements(
+        trace.samples[1].measurements
+    );
+    if (!first_position.has_value() || !second_position.has_value()) {
+        seed.detail =
+            "Fixed-offset nominal prior (bootstrap unavailable: insufficient line-of-sight geometry).";
+        return seed;
+    }
+
+    const double dt_seconds = trace.samples[1].time_seconds - trace.samples[0].time_seconds;
+    if (!(dt_seconds > 0.0)) {
+        seed.detail =
+            "Fixed-offset nominal prior (bootstrap unavailable: non-positive measurement spacing).";
+        return seed;
+    }
+
+    const Eigen::Vector3d velocity_estimate =
+        (second_position->position - first_position->position) / dt_seconds;
+    if (!velocity_estimate.allFinite()) {
+        seed.detail =
+            "Fixed-offset nominal prior (bootstrap unavailable: non-finite velocity estimate).";
+        return seed;
+    }
+
+    const double position_sigma_m = std::clamp(
+        3.0 * std::max(
+            first_position->rms_cross_track_residual_m,
+            second_position->rms_cross_track_residual_m
+        ),
+        150.0,
+        1500.0
+    );
+    const double velocity_sigma_mps = std::clamp(
+        std::sqrt(2.0) * position_sigma_m / dt_seconds,
+        60.0,
+        300.0
+    );
+
+    Eigen::VectorXd bootstrap_state(6);
+    bootstrap_state << second_position->position, velocity_estimate;
+
+    Eigen::MatrixXd bootstrap_covariance = Eigen::MatrixXd::Zero(6, 6);
+    bootstrap_covariance.block<3, 3>(0, 0) =
+        Eigen::Matrix3d::Identity() * (position_sigma_m * position_sigma_m);
+    bootstrap_covariance.block<3, 3>(3, 3) =
+        Eigen::Matrix3d::Identity() * (velocity_sigma_mps * velocity_sigma_mps);
+
+    seed.mode = "TwoEpochTriangulation";
+    seed.detail =
+        "Two-epoch LOS triangulation bootstrap from the first two space-based az/el batches.";
+    seed.initial_time_seconds = trace.samples[1].time_seconds;
+    seed.consumed_sample_count = 2;
+    seed.epochs_used = 2;
+    seed.sensors_used_per_epoch =
+        std::min(first_position->sensors_used, second_position->sensors_used);
+    seed.position_sigma_m = position_sigma_m;
+    seed.velocity_sigma_mps = velocity_sigma_mps;
+    seed.first_epoch_triangulation_residual_m = first_position->rms_cross_track_residual_m;
+    seed.second_epoch_triangulation_residual_m = second_position->rms_cross_track_residual_m;
+    seed.initial_estimate = bootstrap_state;
+    seed.initial_covariance = bootstrap_covariance;
+    return seed;
+}
+
 auto build_model_specs(
     const std::shared_ptr<integrator::RK4Integrator>& integrator,
     double integrator_step_seconds,
     const Eigen::VectorXd& initial_estimate_6d,
     const Eigen::MatrixXd& initial_covariance_6d,
+    double initial_time_seconds,
     const Eigen::Vector3d& ca_model_accel_eci,
     const Eigen::Vector3d& smooth_boost_equilibrium_accel_eci,
     double boost_start_seconds,
@@ -962,7 +1152,8 @@ auto build_model_specs(
 
     auto make_6d_spec = [
         &initial_estimate_6d,
-        &initial_covariance_6d
+        &initial_covariance_6d,
+        initial_time_seconds
     ](
         std::string name,
         std::string motion_model,
@@ -984,7 +1175,8 @@ auto build_model_specs(
                 name,
                 motion_model,
                 description,
-                process_noise_sigma_accel
+                process_noise_sigma_accel,
+                initial_time_seconds
             ](const std::shared_ptr<sensor::ISensorModel>& sensor_model, FilterFamily family) {
                 if (family == FilterFamily::EKF) {
                     return make_ekf_model(
@@ -995,7 +1187,8 @@ auto build_model_specs(
                         name,
                         motion_model,
                         description,
-                        process_noise_sigma_accel
+                        process_noise_sigma_accel,
+                        initial_time_seconds
                     );
                 }
                 if (family == FilterFamily::UKF) {
@@ -1007,7 +1200,8 @@ auto build_model_specs(
                         name,
                         motion_model,
                         description,
-                        process_noise_sigma_accel
+                        process_noise_sigma_accel,
+                        initial_time_seconds
                     );
                 }
 
@@ -1061,7 +1255,8 @@ auto build_model_specs(
             [
                 smooth_boost_initial_estimate,
                 smooth_boost_initial_covariance,
-                smooth_boost_propagator
+                smooth_boost_propagator,
+                initial_time_seconds
             ](const std::shared_ptr<sensor::ISensorModel>& sensor_model, FilterFamily family) {
                 if (family == FilterFamily::EKF) {
                     return make_ekf_model_with_process_noise(
@@ -1073,6 +1268,7 @@ auto build_model_specs(
                         "BoostSmoothAcceleration",
                         "Gravity and drag with a first-order smooth acceleration state tied to a generic boost equilibrium vector instead of a thrust profile.",
                         4.0,
+                        initial_time_seconds,
                         make_smooth_acceleration_state_process_noise(4.0)
                     );
                 }
@@ -1086,6 +1282,7 @@ auto build_model_specs(
                         "BoostSmoothAcceleration",
                         "Gravity and drag with a first-order smooth acceleration state tied to a generic boost equilibrium vector instead of a thrust profile.",
                         4.0,
+                        initial_time_seconds,
                         make_smooth_acceleration_state_process_noise(4.0)
                     );
                 }
@@ -1234,10 +1431,11 @@ auto run_standalone_comparison(
 
     for (int i = 0; i < num_models; ++i) {
         const Eigen::VectorXd state = filters[static_cast<std::size_t>(i)]->get_state();
-        nlohmann::json point = make_state_point(0.0, state);
-        point["phase"] = phase_windows.empty()
-                             ? std::string("Unspecified")
-                             : phase_windows.front().name;
+        nlohmann::json point = make_state_point(trace.initial_time_seconds, state);
+        const int phase_index = phase_index_for_time(trace.initial_time_seconds, phase_windows);
+        point["phase"] = (phase_index >= 0)
+                             ? phase_windows[static_cast<std::size_t>(phase_index)].name
+                             : std::string("Unspecified");
         append_error_fields(point, state, trace.initial_truth_state);
         append_consistency_fields(
             point,
@@ -1263,7 +1461,9 @@ auto run_standalone_comparison(
               << std::setw(16) << "pos err[m]"
               << '\n';
 
-    for (int step = 0; step < static_cast<int>(trace.samples.size()); ++step) {
+    for (int step = trace.first_update_sample_index;
+         step < static_cast<int>(trace.samples.size());
+         ++step) {
         const auto& sample = trace.samples[static_cast<std::size_t>(step)];
         std::vector<double> current_pos_errors(static_cast<std::size_t>(num_models), 0.0);
         std::vector<double> current_vel_errors(static_cast<std::size_t>(num_models), 0.0);
@@ -1298,7 +1498,9 @@ auto run_standalone_comparison(
                 (state.segment<3>(3) - sample.truth_state.segment<3>(3)).norm();
         }
 
-        if ((step + 1) % print_every == 0 || step == 0 || step + 1 == trace.samples.size()) {
+        if ((step + 1) % print_every == 0 ||
+            step == trace.first_update_sample_index ||
+            step + 1 == trace.samples.size()) {
             const auto best_indices = top_error_indices(current_pos_errors, 2);
             const int best_model = best_indices.empty() ? -1 : best_indices.front();
             const int second_model = (best_indices.size() > 1) ? best_indices[1] : -1;
@@ -1407,16 +1609,17 @@ auto run_imm_family(
         result.combined_points.push_back(std::move(point));
     };
 
-    append_combined_point(0.0, trace.initial_truth_state);
+    append_combined_point(trace.initial_time_seconds, trace.initial_truth_state);
     result.combined_stats.add_sample(imm.get_state(), trace.initial_truth_state);
 
     const Eigen::VectorXd initial_mu = imm.get_model_probabilities();
     for (int i = 0; i < num_models; ++i) {
         const Eigen::VectorXd state = imm.get_model_state(i);
-        nlohmann::json point = make_state_point(0.0, state);
-        point["phase"] = phase_windows.empty()
-                             ? std::string("Unspecified")
-                             : phase_windows.front().name;
+        nlohmann::json point = make_state_point(trace.initial_time_seconds, state);
+        const int phase_index = phase_index_for_time(trace.initial_time_seconds, phase_windows);
+        point["phase"] = (phase_index >= 0)
+                             ? phase_windows[static_cast<std::size_t>(phase_index)].name
+                             : std::string("Unspecified");
         point["mode_probability"] = initial_mu(i);
         append_error_fields(point, state, trace.initial_truth_state);
         append_consistency_fields(
@@ -1445,7 +1648,9 @@ auto run_imm_family(
               << std::setw(12) << "mu"
               << '\n';
 
-    for (int step = 0; step < static_cast<int>(trace.samples.size()); ++step) {
+    for (int step = trace.first_update_sample_index;
+         step < static_cast<int>(trace.samples.size());
+         ++step) {
         const auto& sample = trace.samples[static_cast<std::size_t>(step)];
         const double dt = sample.time_seconds - imm.get_time();
         imm.predict(dt);
@@ -1476,7 +1681,9 @@ auto run_imm_family(
             result.model_stats[static_cast<std::size_t>(i)].add_sample(state, sample.truth_state);
         }
 
-        if ((step + 1) % print_every == 0 || step == 0 || step + 1 == trace.samples.size()) {
+        if ((step + 1) % print_every == 0 ||
+            step == trace.first_update_sample_index ||
+            step + 1 == trace.samples.size()) {
             const auto best_indices = top_model_indices(mu, 2);
             const int best_model = best_indices.empty() ? -1 : best_indices.front();
             const int second_model = (best_indices.size() > 1) ? best_indices[1] : -1;
@@ -1755,13 +1962,15 @@ int main(int argc, char* argv[]) {
 
     const Eigen::Vector3d initial_pos_error_enu(3500.0, -2800.0, 2200.0);
     const Eigen::Vector3d initial_vel_error_enu(-120.0, 75.0, -90.0);
-    Eigen::VectorXd initial_estimate(6);
-    initial_estimate << initial_position + enu_to_eci * initial_pos_error_enu,
-                        initial_velocity + enu_to_eci * initial_vel_error_enu;
+    Eigen::VectorXd fallback_initial_estimate(6);
+    fallback_initial_estimate << initial_position + enu_to_eci * initial_pos_error_enu,
+                                 initial_velocity + enu_to_eci * initial_vel_error_enu;
 
-    Eigen::MatrixXd initial_covariance = Eigen::MatrixXd::Zero(6, 6);
-    initial_covariance.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * (5000.0 * 5000.0);
-    initial_covariance.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * (180.0 * 180.0);
+    Eigen::MatrixXd fallback_initial_covariance = Eigen::MatrixXd::Zero(6, 6);
+    fallback_initial_covariance.block<3, 3>(0, 0) =
+        Eigen::Matrix3d::Identity() * (5000.0 * 5000.0);
+    fallback_initial_covariance.block<3, 3>(3, 3) =
+        Eigen::Matrix3d::Identity() * (180.0 * 180.0);
 
     const Eigen::Vector3d boost_accel_enu =
         12.0 * downrange_unit_enu + Eigen::Vector3d(0.0, 0.0, 5.0);
@@ -1821,20 +2030,6 @@ int main(int argc, char* argv[]) {
         }
     );
 
-    const auto model_specs = build_model_specs(
-        integrator,
-        kIntegratorStepSeconds,
-        initial_estimate,
-        initial_covariance,
-        ca_model_accel_eci,
-        smooth_boost_equilibrium_accel_eci,
-        kBoostStartSeconds,
-        kBoostEndSeconds,
-        kTargetMassKg,
-        kTargetDragCoefficient,
-        kTargetReferenceAreaSquareMeters
-    );
-
     const double scenario_duration_seconds = num_steps * dt_seconds;
     const std::vector<PhaseWindow> phase_windows = {
         clamp_phase_window("Boost", 0.0, kBoostEndSeconds, scenario_duration_seconds),
@@ -1858,16 +2053,46 @@ int main(int argc, char* argv[]) {
         )
     };
 
-    const ScenarioTrace trace = record_scenario_trace(
+    ScenarioTrace trace = record_scenario_trace(
         truth_state,
-        initial_estimate,
-        initial_covariance,
+        fallback_initial_estimate,
+        fallback_initial_covariance,
         truth_propagator,
         sensor_model,
         sensor_platforms,
         num_steps,
         dt_seconds,
         seed
+    );
+
+    trace.initialization = make_initialization_seed(
+        trace,
+        fallback_initial_estimate,
+        fallback_initial_covariance
+    );
+    trace.initial_estimate = trace.initialization.initial_estimate;
+    trace.initial_covariance = trace.initialization.initial_covariance;
+    trace.initial_time_seconds = trace.initialization.initial_time_seconds;
+    trace.first_update_sample_index = trace.initialization.consumed_sample_count;
+    if (trace.first_update_sample_index > 0 &&
+        trace.first_update_sample_index <= static_cast<int>(trace.samples.size())) {
+        trace.initial_truth_state =
+            trace.samples[static_cast<std::size_t>(trace.first_update_sample_index - 1)].truth_state;
+    }
+
+    const auto model_specs = build_model_specs(
+        integrator,
+        kIntegratorStepSeconds,
+        trace.initial_estimate,
+        trace.initial_covariance,
+        trace.initial_time_seconds,
+        ca_model_accel_eci,
+        smooth_boost_equilibrium_accel_eci,
+        kBoostStartSeconds,
+        kBoostEndSeconds,
+        kTargetMassKg,
+        kTargetDragCoefficient,
+        kTargetReferenceAreaSquareMeters
     );
 
     std::cout << "High-altitude ballistic tracking demo with separate EKF/UKF evaluation paths\n";
@@ -1886,6 +2111,15 @@ int main(int argc, char* argv[]) {
         std::cout << "  " << spec.id << " -> alt " << (spec.altitude_m / 1000.0)
                   << " km, lead " << spec.lead_angle_deg
                   << " deg, heading " << spec.heading_deg << " deg\n";
+    }
+    std::cout << "Initialization: " << trace.initialization.mode
+              << " at t=" << trace.initial_time_seconds << " s\n";
+    std::cout << "  " << trace.initialization.detail << '\n';
+    if (trace.initialization.mode == "TwoEpochTriangulation") {
+        std::cout << "  epochs used: " << trace.initialization.epochs_used
+                  << ", sensors/epoch: " << trace.initialization.sensors_used_per_epoch
+                  << ", pos sigma: " << trace.initialization.position_sigma_m
+                  << " m, vel sigma: " << trace.initialization.velocity_sigma_mps << " m/s\n";
     }
 
     std::vector<DemoRunResult> run_results;
@@ -1988,6 +2222,7 @@ int main(int argc, char* argv[]) {
     data_json["summary"]["requested"]["filter_family"] = filter_family_to_string(filter_family);
     data_json["summary"]["simulation"]["coordinate_frame"] = "ECI";
     data_json["summary"]["simulation"]["start_time"] = 0.0;
+    data_json["summary"]["simulation"]["filter_start_time"] = trace.initial_time_seconds;
     data_json["summary"]["simulation"]["timestep"] = dt_seconds;
     data_json["summary"]["simulation"]["integrator_timestep"] = kIntegratorStepSeconds;
     data_json["summary"]["simulation"]["steps"] = num_steps;
@@ -2032,6 +2267,20 @@ int main(int argc, char* argv[]) {
     data_json["summary"]["target"]["reference_area_m2"] = kTargetReferenceAreaSquareMeters;
     data_json["summary"]["sensor"]["type"] = "SpaceBasedAzEl[azimuth,elevation]";
     data_json["summary"]["sensor"]["count"] = sensor_count;
+    data_json["summary"]["initialization"] = {
+        {"mode", trace.initialization.mode},
+        {"detail", trace.initialization.detail},
+        {"time_seconds", trace.initialization.initial_time_seconds},
+        {"consumed_sample_count", trace.initialization.consumed_sample_count},
+        {"epochs_used", trace.initialization.epochs_used},
+        {"sensors_used_per_epoch", trace.initialization.sensors_used_per_epoch},
+        {"position_sigma_m", trace.initialization.position_sigma_m},
+        {"velocity_sigma_mps", trace.initialization.velocity_sigma_mps},
+        {"first_epoch_triangulation_residual_m",
+         trace.initialization.first_epoch_triangulation_residual_m},
+        {"second_epoch_triangulation_residual_m",
+         trace.initialization.second_epoch_triangulation_residual_m}
+    };
     data_json["summary"]["sensor"]["constellation"] = nlohmann::json::array();
     for (const auto& sensor_platform : sensor_platforms) {
         const auto& spec = sensor_platform.spec;
