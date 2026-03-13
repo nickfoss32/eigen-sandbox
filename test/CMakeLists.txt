@@ -70,6 +70,23 @@ target_link_libraries(estimation_tests
 )
 gtest_discover_tests(estimation_tests)
 
+# Tracking tests
+add_executable(tracking_tests
+    test_tracking_tracker.cpp
+)
+target_link_libraries(tracking_tests
+    PRIVATE
+        GTest::gtest_main
+        tracking::tracking
+        tracking::estimation
+        tracking::filtering
+        tracking::integrator
+        tracking::propagator
+        tracking::sensor
+        tracking::dynamics
+)
+gtest_discover_tests(tracking_tests)
+
 # Integrator tests
 add_executable(integrator_tests
     test_integrator_rk4.cpp

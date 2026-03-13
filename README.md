@@ -87,6 +87,11 @@ filtering::ExtendedKalmanFilter
 filtering::UnscentedKalmanFilter
 filtering::UnscentedTransform
 
+// Tracking (how to maintain target tracks over time)
+tracking::Track
+tracking::NearestNeighborAssociator
+tracking::Tracker
+
 // Propagators (how state evolves)
 propagator::IPropagator
 propagator::NumericalPropagator

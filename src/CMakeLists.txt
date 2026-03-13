@@ -25,5 +25,8 @@ add_subdirectory(propagator)
 # sensor lib
 add_subdirectory(sensor)
 
+# tracking lib
+add_subdirectory(tracking)
+
 # transforms lib
 add_subdirectory(transforms)
