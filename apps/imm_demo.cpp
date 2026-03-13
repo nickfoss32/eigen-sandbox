@@ -25,6 +25,7 @@
 #include <dynamics/forces/gravity.hpp>
 #include <dynamics/forces/time_window_force.hpp>
 #include <dynamics/point_mass_dynamics.hpp>
+#include <dynamics/smooth_acceleration_point_mass_dynamics.hpp>
 #include <estimation/imm.hpp>
 #include <filtering/extended_kalman_filter.hpp>
 #include <filtering/unscented_kalman_filter.hpp>
@@ -43,7 +44,8 @@ constexpr double kDegToRad = std::numbers::pi / 180.0;
 struct ErrorStats {
     void add_sample(const Eigen::VectorXd& estimate, const Eigen::VectorXd& truth) {
         const double pos_error = (estimate.head<3>() - truth.head<3>()).norm();
-        const double vel_error = (estimate.tail<3>() - truth.tail<3>()).norm();
+        const double vel_error =
+            (estimate.segment<3>(3) - truth.segment<3>(3)).norm();
 
         pos_sq_sum += pos_error * pos_error;
         vel_sq_sum += vel_error * vel_error;
@@ -103,12 +105,17 @@ struct ModelInfo {
     double process_noise_sigma_accel = 0.0;
 };
 
+struct ModelBuild;
+
+using ModelFactory = std::function<ModelBuild(const std::shared_ptr<sensor::ISensorModel>&, FilterFamily)>;
+
 struct ModelSpec {
     std::string name;
     std::string motion_model;
     std::string description;
     double process_noise_sigma_accel = 0.0;
-    std::shared_ptr<propagator::IPropagator> propagator;
+    bool include_in_imm = true;
+    ModelFactory factory;
 };
 
 struct ModelBuild {
@@ -270,6 +277,16 @@ auto make_white_acceleration_process_noise(double sigma_accel)
     };
 }
 
+auto make_smooth_acceleration_state_process_noise(double sigma_accel)
+    -> std::function<Eigen::MatrixXd(double)> {
+    return [sigma_accel](double dt) {
+        const double sigma2 = sigma_accel * sigma_accel;
+        Eigen::MatrixXd Q = Eigen::MatrixXd::Zero(9, 9);
+        Q.block<3, 3>(6, 6) = dt * sigma2 * Eigen::Matrix3d::Identity();
+        return Q;
+    };
+}
+
 auto make_propagator(
     std::shared_ptr<integrator::RK4Integrator> integrator,
     double timestep_seconds,
@@ -283,7 +300,19 @@ auto make_propagator(
     );
 }
 
-auto make_ekf_model(
+auto make_propagator_from_dynamics(
+    std::shared_ptr<integrator::RK4Integrator> integrator,
+    double timestep_seconds,
+    const std::shared_ptr<dynamics::IDynamics>& dynamics_model
+) -> std::shared_ptr<propagator::NumericalPropagator> {
+    return std::make_shared<propagator::NumericalPropagator>(
+        dynamics_model,
+        std::move(integrator),
+        timestep_seconds
+    );
+}
+
+auto make_ekf_model_with_process_noise(
     const Eigen::VectorXd& initial_state,
     const Eigen::MatrixXd& initial_covariance,
     const std::shared_ptr<sensor::ISensorModel>& sensor_model,
@@ -291,7 +320,8 @@ auto make_ekf_model(
     std::string name,
     std::string motion_model,
     std::string description,
-    double sigma_accel
+    double sigma_accel,
+    filtering::ExtendedKalmanFilter::ProcessNoiseFunction process_noise_function
 ) -> ModelBuild {
     std::unique_ptr<filtering::IKalmanFilter> filter =
         std::make_unique<filtering::ExtendedKalmanFilter>(
@@ -299,7 +329,7 @@ auto make_ekf_model(
             initial_covariance,
             propagator,
             sensor_model,
-            make_white_acceleration_process_noise(sigma_accel),
+            std::move(process_noise_function),
             0.0
         );
 
@@ -315,7 +345,7 @@ auto make_ekf_model(
     };
 }
 
-auto make_ukf_model(
+auto make_ukf_model_with_process_noise(
     const Eigen::VectorXd& initial_state,
     const Eigen::MatrixXd& initial_covariance,
     const std::shared_ptr<sensor::ISensorModel>& sensor_model,
@@ -323,7 +353,8 @@ auto make_ukf_model(
     std::string name,
     std::string motion_model,
     std::string description,
-    double sigma_accel
+    double sigma_accel,
+    filtering::UnscentedKalmanFilter::ProcessNoiseFunction process_noise_function
 ) -> ModelBuild {
     std::unique_ptr<filtering::IKalmanFilter> filter =
         std::make_unique<filtering::UnscentedKalmanFilter>(
@@ -331,7 +362,7 @@ auto make_ukf_model(
             initial_covariance,
             propagator,
             sensor_model,
-            make_white_acceleration_process_noise(sigma_accel),
+            std::move(process_noise_function),
             0.0
         );
 
@@ -345,6 +376,52 @@ auto make_ukf_model(
         },
         std::move(filter)
     };
+}
+
+auto make_ekf_model(
+    const Eigen::VectorXd& initial_state,
+    const Eigen::MatrixXd& initial_covariance,
+    const std::shared_ptr<sensor::ISensorModel>& sensor_model,
+    const std::shared_ptr<propagator::IPropagator>& propagator,
+    std::string name,
+    std::string motion_model,
+    std::string description,
+    double sigma_accel
+) -> ModelBuild {
+    return make_ekf_model_with_process_noise(
+        initial_state,
+        initial_covariance,
+        sensor_model,
+        propagator,
+        std::move(name),
+        std::move(motion_model),
+        std::move(description),
+        sigma_accel,
+        make_white_acceleration_process_noise(sigma_accel)
+    );
+}
+
+auto make_ukf_model(
+    const Eigen::VectorXd& initial_state,
+    const Eigen::MatrixXd& initial_covariance,
+    const std::shared_ptr<sensor::ISensorModel>& sensor_model,
+    const std::shared_ptr<propagator::IPropagator>& propagator,
+    std::string name,
+    std::string motion_model,
+    std::string description,
+    double sigma_accel
+) -> ModelBuild {
+    return make_ukf_model_with_process_noise(
+        initial_state,
+        initial_covariance,
+        sensor_model,
+        propagator,
+        std::move(name),
+        std::move(motion_model),
+        std::move(description),
+        sigma_accel,
+        make_white_acceleration_process_noise(sigma_accel)
+    );
 }
 
 auto normalize_cli_value(std::string value) -> std::string {
@@ -465,7 +542,7 @@ auto matrix_to_json_array(const Eigen::MatrixXd& matrix) -> nlohmann::json {
 auto make_state_point(double time_seconds, const Eigen::VectorXd& state) -> nlohmann::json {
     return {
         {"time", time_seconds},
-        {"state", {state(0), state(1), state(2), state(3), state(4), state(5)}}
+        {"state", vector_to_json_array(state)}
     };
 }
 
@@ -487,7 +564,8 @@ void append_error_fields(
     const Eigen::VectorXd& truth
 ) {
     point["position_error_m"] = (estimate.head<3>() - truth.head<3>()).norm();
-    point["velocity_error_mps"] = (estimate.tail<3>() - truth.tail<3>()).norm();
+    point["velocity_error_mps"] =
+        (estimate.segment<3>(3) - truth.segment<3>(3)).norm();
 }
 
 auto compute_mahalanobis_squared(
@@ -525,8 +603,12 @@ void append_consistency_fields(
     const Eigen::MatrixXd& covariance,
     const Eigen::VectorXd& truth
 ) {
-    const Eigen::VectorXd state_error = estimate - truth;
-    const double state_nees = compute_mahalanobis_squared(state_error, covariance);
+    const int compare_dim = std::min(6, std::min(static_cast<int>(estimate.size()), static_cast<int>(truth.size())));
+    const Eigen::VectorXd state_error = estimate.head(compare_dim) - truth.head(compare_dim);
+    const double state_nees = compute_mahalanobis_squared(
+        state_error,
+        covariance.block(0, 0, compare_dim, compare_dim)
+    );
     const double position_nees = compute_mahalanobis_squared(
         state_error.head<3>(),
         covariance.block(0, 0, 3, 3)
@@ -534,7 +616,7 @@ void append_consistency_fields(
 
     if (std::isfinite(state_nees)) {
         point["state_nees"] = state_nees;
-        point["state_nees_per_dim"] = state_nees / static_cast<double>(estimate.size());
+        point["state_nees_per_dim"] = state_nees / static_cast<double>(compare_dim);
     }
     if (std::isfinite(position_nees)) {
         point["position_nees"] = position_nees;
@@ -792,7 +874,12 @@ auto make_sensor_platform(
 auto build_model_specs(
     const std::shared_ptr<integrator::RK4Integrator>& integrator,
     double integrator_step_seconds,
+    const Eigen::VectorXd& initial_estimate_6d,
+    const Eigen::MatrixXd& initial_covariance_6d,
     const Eigen::Vector3d& ca_model_accel_eci,
+    const Eigen::Vector3d& smooth_boost_equilibrium_accel_eci,
+    double boost_start_seconds,
+    double boost_end_seconds,
     double target_mass_kg,
     double target_drag_coefficient,
     double target_reference_area_square_meters
@@ -839,82 +926,190 @@ auto build_model_specs(
             )
         }
     );
+    const std::shared_ptr<propagator::IPropagator> smooth_boost_propagator =
+        make_propagator_from_dynamics(
+            integrator,
+            integrator_step_seconds,
+            std::make_shared<dynamics::SmoothAccelerationPointMassDynamics>(
+                std::vector<std::shared_ptr<dynamics::IForce>>{
+                    std::make_shared<dynamics::PointMassGravity>(),
+                    std::make_shared<dynamics::AtmosphericDrag>(
+                        target_mass_kg,
+                        target_drag_coefficient,
+                        target_reference_area_square_meters,
+                        kEarthRadiusMeters
+                    )
+                },
+                9.0,
+                [boost_start_seconds, boost_end_seconds, smooth_boost_equilibrium_accel_eci](
+                    double time_seconds
+                ) {
+                    return (time_seconds >= boost_start_seconds &&
+                            time_seconds <= boost_end_seconds)
+                               ? smooth_boost_equilibrium_accel_eci
+                               : Eigen::Vector3d::Zero();
+                }
+            )
+        );
+
+    Eigen::VectorXd smooth_boost_initial_estimate(9);
+    smooth_boost_initial_estimate << initial_estimate_6d, smooth_boost_equilibrium_accel_eci;
+
+    Eigen::MatrixXd smooth_boost_initial_covariance = Eigen::MatrixXd::Zero(9, 9);
+    smooth_boost_initial_covariance.block(0, 0, 6, 6) = initial_covariance_6d;
+    smooth_boost_initial_covariance.block<3, 3>(6, 6) =
+        Eigen::Matrix3d::Identity() * (6.0 * 6.0);
+
+    auto make_6d_spec = [
+        &initial_estimate_6d,
+        &initial_covariance_6d
+    ](
+        std::string name,
+        std::string motion_model,
+        std::string description,
+        double process_noise_sigma_accel,
+        const std::shared_ptr<propagator::IPropagator>& propagator
+    ) -> ModelSpec {
+        ModelSpec spec;
+        spec.name = name;
+        spec.motion_model = motion_model;
+        spec.description = description;
+        spec.process_noise_sigma_accel = process_noise_sigma_accel;
+        spec.include_in_imm = true;
+        spec.factory =
+            [
+                initial_estimate_6d,
+                initial_covariance_6d,
+                propagator,
+                name,
+                motion_model,
+                description,
+                process_noise_sigma_accel
+            ](const std::shared_ptr<sensor::ISensorModel>& sensor_model, FilterFamily family) {
+                if (family == FilterFamily::EKF) {
+                    return make_ekf_model(
+                        initial_estimate_6d,
+                        initial_covariance_6d,
+                        sensor_model,
+                        propagator,
+                        name,
+                        motion_model,
+                        description,
+                        process_noise_sigma_accel
+                    );
+                }
+                if (family == FilterFamily::UKF) {
+                    return make_ukf_model(
+                        initial_estimate_6d,
+                        initial_covariance_6d,
+                        sensor_model,
+                        propagator,
+                        name,
+                        motion_model,
+                        description,
+                        process_noise_sigma_accel
+                    );
+                }
+
+                throw std::invalid_argument("Model factory requires EKF or UKF family");
+            };
+        return spec;
+    };
 
     return {
-        {
+        make_6d_spec(
             "CV",
             "ConstantVelocity",
             "Kinematic constant-velocity hypothesis with no explicit forces.",
             35.0,
             cv_propagator
-        },
-        {
+        ),
+        make_6d_spec(
             "CA",
             "ConstantAcceleration",
             "Kinematic constant-acceleration hypothesis aligned with the nominal ballistic corridor.",
             18.0,
             ca_propagator
-        },
-        {
+        ),
+        make_6d_spec(
             "Gravity",
             "Gravity",
             "Point-mass gravity only, without drag.",
             9.0,
             gravity_propagator
-        },
-        {
+        ),
+        make_6d_spec(
             "GravityDrag",
             "GravityPlusDrag",
             "Point-mass gravity with atmospheric drag in the inertial frame.",
             6.0,
             gravity_drag_propagator
-        },
-        {
+        ),
+        make_6d_spec(
             "J2Drag",
             "J2PlusDrag",
             "J2 gravity with atmospheric drag for a more detailed ballistic model.",
             4.5,
             j2_drag_propagator
+        ),
+        ModelSpec{
+            "BoostSmooth",
+            "BoostSmoothAcceleration",
+            "Gravity and drag with a first-order smooth acceleration state tied to a generic boost equilibrium vector instead of a thrust profile.",
+            4.0,
+            false,
+            [
+                smooth_boost_initial_estimate,
+                smooth_boost_initial_covariance,
+                smooth_boost_propagator
+            ](const std::shared_ptr<sensor::ISensorModel>& sensor_model, FilterFamily family) {
+                if (family == FilterFamily::EKF) {
+                    return make_ekf_model_with_process_noise(
+                        smooth_boost_initial_estimate,
+                        smooth_boost_initial_covariance,
+                        sensor_model,
+                        smooth_boost_propagator,
+                        "BoostSmooth",
+                        "BoostSmoothAcceleration",
+                        "Gravity and drag with a first-order smooth acceleration state tied to a generic boost equilibrium vector instead of a thrust profile.",
+                        4.0,
+                        make_smooth_acceleration_state_process_noise(4.0)
+                    );
+                }
+                if (family == FilterFamily::UKF) {
+                    return make_ukf_model_with_process_noise(
+                        smooth_boost_initial_estimate,
+                        smooth_boost_initial_covariance,
+                        sensor_model,
+                        smooth_boost_propagator,
+                        "BoostSmooth",
+                        "BoostSmoothAcceleration",
+                        "Gravity and drag with a first-order smooth acceleration state tied to a generic boost equilibrium vector instead of a thrust profile.",
+                        4.0,
+                        make_smooth_acceleration_state_process_noise(4.0)
+                    );
+                }
+
+                throw std::invalid_argument("Model factory requires EKF or UKF family");
+            }
         }
     };
 }
 
 auto build_model_bank(
     FilterFamily family,
-    const Eigen::VectorXd& initial_state,
-    const Eigen::MatrixXd& initial_covariance,
     const std::shared_ptr<sensor::ISensorModel>& sensor_model,
-    const std::vector<ModelSpec>& model_specs
+    const std::vector<ModelSpec>& model_specs,
+    bool imm_compatible_only
 ) -> std::vector<ModelBuild> {
     std::vector<ModelBuild> model_builds;
     model_builds.reserve(model_specs.size());
 
     for (const auto& spec : model_specs) {
-        if (family == FilterFamily::EKF) {
-            model_builds.push_back(make_ekf_model(
-                initial_state,
-                initial_covariance,
-                sensor_model,
-                spec.propagator,
-                spec.name,
-                spec.motion_model,
-                spec.description,
-                spec.process_noise_sigma_accel
-            ));
-        } else if (family == FilterFamily::UKF) {
-            model_builds.push_back(make_ukf_model(
-                initial_state,
-                initial_covariance,
-                sensor_model,
-                spec.propagator,
-                spec.name,
-                spec.motion_model,
-                spec.description,
-                spec.process_noise_sigma_accel
-            ));
-        } else {
-            throw std::invalid_argument("build_model_bank requires EKF or UKF family");
+        if (imm_compatible_only && !spec.include_in_imm) {
+            continue;
         }
+        model_builds.push_back(spec.factory(sensor_model, family));
     }
 
     return model_builds;
@@ -1020,10 +1215,9 @@ auto run_standalone_comparison(
 
     auto model_builds = build_model_bank(
         family,
-        trace.initial_estimate,
-        trace.initial_covariance,
         sensor_model,
-        model_specs
+        model_specs,
+        false
     );
 
     std::vector<std::unique_ptr<filtering::IKalmanFilter>> filters;
@@ -1101,7 +1295,7 @@ auto run_standalone_comparison(
             current_pos_errors[static_cast<std::size_t>(i)] =
                 (state.head<3>() - sample.truth_state.head<3>()).norm();
             current_vel_errors[static_cast<std::size_t>(i)] =
-                (state.tail<3>() - sample.truth_state.tail<3>()).norm();
+                (state.segment<3>(3) - sample.truth_state.segment<3>(3)).norm();
         }
 
         if ((step + 1) % print_every == 0 || step == 0 || step + 1 == trace.samples.size()) {
@@ -1167,10 +1361,9 @@ auto run_imm_family(
 
     auto model_builds = build_model_bank(
         family,
-        trace.initial_estimate,
-        trace.initial_covariance,
         sensor_model,
-        model_specs
+        model_specs,
+        true
     );
 
     std::vector<std::unique_ptr<filtering::IKalmanFilter>> filters;
@@ -1578,6 +1771,8 @@ int main(int argc, char* argv[]) {
     const Eigen::Vector3d divert_accel_eci = enu_to_eci * divert_accel_enu;
     const Eigen::Vector3d ca_model_accel_eci =
         enu_to_eci * (5.0 * downrange_unit_enu + Eigen::Vector3d(0.0, 0.0, 2.0));
+    const Eigen::Vector3d smooth_boost_equilibrium_accel_eci =
+        enu_to_eci * (8.0 * downrange_unit_enu + Eigen::Vector3d(0.0, 0.0, 3.0));
 
     std::shared_ptr<sensor::ISensorModel> sensor_model =
         std::make_shared<sensor::SpaceBasedAzElSensorModel>(kAzNoiseRad, kElNoiseRad);
@@ -1629,7 +1824,12 @@ int main(int argc, char* argv[]) {
     const auto model_specs = build_model_specs(
         integrator,
         kIntegratorStepSeconds,
+        initial_estimate,
+        initial_covariance,
         ca_model_accel_eci,
+        smooth_boost_equilibrium_accel_eci,
+        kBoostStartSeconds,
+        kBoostEndSeconds,
         kTargetMassKg,
         kTargetDragCoefficient,
         kTargetReferenceAreaSquareMeters

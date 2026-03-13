@@ -10,6 +10,7 @@ add_library(dynamics
     forces/gravity.cpp
     forces/time_window_force.cpp
     point_mass_dynamics.cpp
+    smooth_acceleration_point_mass_dynamics.cpp
     rigid_body_dynamics.cpp
     torques/aerodynamic_torque.cpp
     torques/gravity_gradient_torque.cpp

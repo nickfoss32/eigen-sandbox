@@ -27,6 +27,7 @@ add_executable(dynamics_tests
     test_dynamics_gravity.cpp
     test_dynamics_point_mass_dynamics.cpp
     test_dynamics_rigid_body_dynamics.cpp
+    test_dynamics_smooth_acceleration_point_mass_dynamics.cpp
     test_dynamics_time_window_force.cpp
 )
 target_link_libraries(dynamics_tests

@@ -2,7 +2,7 @@
 This repo contains a sandbox for trajectory simulation, propagation, and state estimation in C++ with Eigen.
 It includes:
 - A noisy track generator and propagator workflow for ballistic-style trajectories.
-- An IMM/standalone comparison demo that tracks a high-altitude ballistic point-mass target with space-based az/el sensing, while evaluating `CV`, `CA`, `Gravity`, `Gravity+Drag`, and `J2+Drag` motion models with EKF and UKF runs kept separate.
+- An IMM/standalone comparison demo that tracks a high-altitude ballistic point-mass target with space-based az/el sensing, while evaluating `CV`, `CA`, `Gravity`, `Gravity+Drag`, `J2+Drag`, and a smooth-acceleration boost model with EKF and UKF runs kept separate.
 - A Python globe plotter that can render single or multiple trajectories from JSON outputs.
 
 # Dependencies
@@ -16,7 +16,7 @@ It includes:
 There are 3 apps and 1 plot script in this repository:
 * `generate-data` - Creates simulated noisy (Gaussian) track data and outputs to JSON. Simulation parameters are defaulted to Cape Canaveral, FL. Each parameter can be modified via CLI.
 * `propagate-track` - Reads in output data from `generate-data`, and propagates state forward in time. A best fit plane is calculated amongst noisy points before propagating. See CLI for details.
-* `imm-demo` - Replays one synthetic high-altitude ballistic point-mass scenario through two evaluation modes: standalone per-model comparison and motion-model IMM. EKF and UKF are run separately, each family evaluates `CV`, `CA`, `Gravity`, `Gravity+Drag`, and `J2+Drag`, and the target can be observed by a configurable 1-5 sensor space-based az/el constellation (default: 3).
+* `imm-demo` - Replays one synthetic high-altitude ballistic point-mass scenario through two evaluation modes: standalone per-model comparison and motion-model IMM. EKF and UKF are run separately. Standalone comparison evaluates `CV`, `CA`, `Gravity`, `Gravity+Drag`, `J2+Drag`, and `BoostSmooth`, while the IMM keeps the matched 6-state motion-model bank of `CV`, `CA`, `Gravity`, `Gravity+Drag`, and `J2+Drag`. The target can be observed by a configurable 1-5 sensor space-based az/el constellation (default: 3).
 * `scripts/plot.py` - Plots trajectory JSON on a globe. Supports both legacy single-trajectory files (`points`) and multi-trajectory files (`trajectories`), including IMM demo output.
 * `scripts/plot_filter_eval.py` - Builds a filter-evaluation HTML dashboard from `imm-demo` JSON, including error time series, NEES consistency traces, phase-wise RMSE bars, and IMM mode probability plots.
 
