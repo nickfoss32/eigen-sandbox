@@ -39,6 +39,8 @@ public:
     }
 
     void predict_to(double time_seconds);
+    void assimilate_measurement(const common::Measurement& measurement);
+    void finalize_epoch(bool received_measurement);
     void update(const common::Measurement& measurement);
     void mark_missed();
     void set_quality(common::TrackQuality quality) { quality_ = quality; }

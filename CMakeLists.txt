@@ -81,6 +81,23 @@ target_link_libraries(imm-demo
         tracking::sensor
 )
 
+add_executable(tracker-demo apps/tracker_demo.cpp)
+target_include_directories(tracker-demo PRIVATE include)
+target_link_libraries(tracker-demo
+    PRIVATE
+        Eigen3::Eigen
+        nlohmann_json::nlohmann_json
+        Boost::program_options
+        tracking::common
+        tracking::dynamics
+        tracking::estimation
+        tracking::filtering
+        tracking::integrator
+        tracking::propagator
+        tracking::sensor
+        tracking::tracking
+)
+
 # Optionally build tests
 if(BUILD_TESTS)
     find_package(GTest CONFIG QUIET)

@@ -47,17 +47,30 @@ void Track::predict_to(double time_seconds) {
     }
 }
 
-void Track::update(const common::Measurement& measurement) {
+void Track::assimilate_measurement(const common::Measurement& measurement) {
     imm_->update(measurement);
     last_update_time_ = measurement.time;
-    ++total_updates_;
-    ++consecutive_hits_;
-    consecutive_misses_ = 0;
+}
+
+void Track::finalize_epoch(bool received_measurement) {
+    if (received_measurement) {
+        ++total_updates_;
+        ++consecutive_hits_;
+        consecutive_misses_ = 0;
+        return;
+    }
+
+    consecutive_hits_ = 0;
+    ++consecutive_misses_;
+}
+
+void Track::update(const common::Measurement& measurement) {
+    assimilate_measurement(measurement);
+    finalize_epoch(true);
 }
 
 void Track::mark_missed() {
-    consecutive_hits_ = 0;
-    ++consecutive_misses_;
+    finalize_epoch(false);
 }
 
 } // namespace tracking
