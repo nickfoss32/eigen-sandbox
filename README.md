@@ -2,7 +2,7 @@
 This repo contains a sandbox for trajectory simulation, propagation, and state estimation in C++ with Eigen.
 It includes:
 - A noisy track generator and propagator workflow for ballistic-style trajectories.
-- An IMM/standalone comparison demo that tracks a high-altitude ballistic point-mass target with space-based az/el sensing, while evaluating `CV`, `CA`, `Gravity`, `Gravity+Drag`, `J2+Drag`, and a smooth-acceleration boost model with EKF and UKF runs kept separate.
+- An IMM/standalone comparison demo that tracks a high-altitude ballistic point-mass target with space-based az/el sensing, while evaluating `CV`, `CA`, `Gravity`, `Gravity+Drag`, `J2+Drag`, and a smooth-acceleration boost model with EKF and UKF runs kept separate. IMM runs also emit an RTS-smoothed combined trajectory for backward-pass smoothing analysis.
 - A Python globe plotter that can render single or multiple trajectories from JSON outputs.
 
 # Dependencies
@@ -16,9 +16,12 @@ It includes:
 There are 3 apps and 1 plot script in this repository:
 * `generate-data` - Creates simulated noisy (Gaussian) track data and outputs to JSON. Simulation parameters are defaulted to Cape Canaveral, FL. Each parameter can be modified via CLI.
 * `propagate-track` - Reads in output data from `generate-data`, and propagates state forward in time. A best fit plane is calculated amongst noisy points before propagating. See CLI for details.
-* `imm-demo` - Replays one synthetic high-altitude ballistic point-mass scenario through two evaluation modes: standalone per-model comparison and motion-model IMM. EKF and UKF are run separately. Standalone comparison evaluates `CV`, `CA`, `Gravity`, `Gravity+Drag`, `J2+Drag`, and `BoostSmooth`, while the IMM keeps the matched 6-state motion-model bank of `CV`, `CA`, `Gravity`, `Gravity+Drag`, and `J2+Drag`. By default, the demo bootstraps the filter state from the first two multi-sensor az/el epochs when geometry allows; otherwise it falls back to the nominal hand-tuned prior. The target can be observed by a configurable 1-5 sensor space-based az/el constellation (default: 3).
+* `imm-demo` - Replays one synthetic high-altitude ballistic point-mass scenario through two evaluation modes: standalone per-model comparison and motion-model IMM. EKF and UKF are run separately. Standalone comparison evaluates `CV`, `CA`, `Gravity`, `Gravity+Drag`, `J2+Drag`, and `BoostSmooth`, while the IMM keeps the matched 6-state motion-model bank of `CV`, `CA`, `Gravity`, `Gravity+Drag`, and `J2+Drag`. IMM runs now also compute an RTS-smoothed version of the combined IMM state history so you can compare filtered versus smoothed estimates in the same scenario. By default, the demo bootstraps the filter state from the first two multi-sensor az/el epochs when geometry allows; otherwise it falls back to the nominal hand-tuned prior. The target can be observed by a configurable 1-5 sensor space-based az/el constellation (default: 3).
 * `scripts/plot.py` - Plots trajectory JSON on a globe. Supports both legacy single-trajectory files (`points`) and multi-trajectory files (`trajectories`), including IMM demo output.
-* `scripts/plot_filter_eval.py` - Builds a filter-evaluation HTML dashboard from `imm-demo` JSON, including error time series, NEES consistency traces, phase-wise RMSE bars, and IMM mode probability plots.
+* `scripts/plot_filter_eval.py` - Builds a filter-evaluation HTML dashboard from `imm-demo` JSON, including filtered versus RTS-smoothed error time series, NEES consistency traces, phase-wise RMSE bars, a filtered-vs-smoothed IMM RMSE comparison panel, and IMM mode probability plots.
+
+Library note:
+- Fixed-interval smoothing now lives in the estimation library behind `estimation::ISmoother`, with `estimation::RTSSmoother` providing the current Rauch-Tung-Striebel implementation used by `imm-demo`.
 
 `imm-demo` CLI:
 - `-h, --help` Show usage.
@@ -34,8 +37,9 @@ There are 3 apps and 1 plot script in this repository:
 `imm-demo` JSON includes:
 - `points`: A primary estimate trajectory chosen for backward compatibility. When an IMM run is present, this is the first IMM combined estimate.
 - `trajectories`: Per-trajectory series for `Truth`, each standalone model run, and each IMM run.
+- IMM runs also add an `RTSCombined` trajectory alongside the filtered `Combined` trajectory.
 - `measurements`: Noisy space-based az/el measurements `[azimuth, elevation]`.
-- `summary.runs`: Per-run metadata and performance. Standalone runs report model RMSE rankings; IMM runs also report transition matrices, final mode probabilities, and combined-estimate performance.
+- `summary.runs`: Per-run metadata and performance. Standalone runs report model RMSE rankings; IMM runs also report transition matrices, final mode probabilities, filtered combined performance, and RTS-smoothed combined performance.
 - `summary.initialization`: Bootstrap mode, start time, and estimated uncertainty used to seed the filters.
 - `summary.simulation.phases`: Named boost/coast/divert/post-divert windows used for phase-by-phase scoring.
 - `summary.sensor.constellation`: Active sensor geometries and noise settings for the selected 1-5 sensor configuration.
@@ -86,6 +90,11 @@ filtering::IKalmanFilter
 filtering::ExtendedKalmanFilter
 filtering::UnscentedKalmanFilter
 filtering::UnscentedTransform
+
+// Estimation and smoothing
+estimation::IMM
+estimation::ISmoother
+estimation::RTSSmoother
 
 // Propagators (how state evolves)
 propagator::IPropagator

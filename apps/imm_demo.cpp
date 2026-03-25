@@ -28,6 +28,8 @@
 #include <dynamics/point_mass_dynamics.hpp>
 #include <dynamics/smooth_acceleration_point_mass_dynamics.hpp>
 #include <estimation/imm.hpp>
+#include <estimation/rts_smoother.hpp>
+#include <estimation/smoother.hpp>
 #include <filtering/extended_kalman_filter.hpp>
 #include <filtering/unscented_kalman_filter.hpp>
 #include <integrator/rk4.hpp>
@@ -116,6 +118,7 @@ struct ModelSpec {
     std::string description;
     double process_noise_sigma_accel = 0.0;
     bool include_in_imm = true;
+    std::shared_ptr<propagator::IPropagator> smoother_propagator;
     ModelFactory factory;
 };
 
@@ -194,6 +197,9 @@ struct DemoRunResult {
     nlohmann::json combined_points = nlohmann::json::array();
     ErrorStats combined_stats;
     bool has_combined = false;
+    nlohmann::json smoothed_combined_points = nlohmann::json::array();
+    ErrorStats smoothed_combined_stats;
+    bool has_smoothed_combined = false;
     Eigen::VectorXd initial_model_probabilities;
     Eigen::MatrixXd transition_matrix;
     Eigen::VectorXd final_model_probabilities;
@@ -820,6 +826,50 @@ auto rank_model_stats(const std::vector<ErrorStats>& model_stats) -> std::vector
     return ranking;
 }
 
+auto compute_mixed_transition_jacobian(
+    double start_time_seconds,
+    const Eigen::VectorXd& filtered_state,
+    double dt_seconds,
+    const Eigen::VectorXd& model_probabilities,
+    const std::vector<ModelSpec>& imm_model_specs
+) -> Eigen::MatrixXd {
+    const int state_dim = static_cast<int>(filtered_state.size());
+    Eigen::MatrixXd mixed_jacobian = Eigen::MatrixXd::Zero(state_dim, state_dim);
+    double weight_sum = 0.0;
+
+    for (int i = 0;
+         i < static_cast<int>(imm_model_specs.size()) && i < model_probabilities.size();
+         ++i) {
+        const auto& spec = imm_model_specs[static_cast<std::size_t>(i)];
+        if (!spec.smoother_propagator) {
+            continue;
+        }
+
+        const double weight = std::max(0.0, model_probabilities(i));
+        if (!(weight > 0.0)) {
+            continue;
+        }
+
+        const Eigen::MatrixXd jacobian = spec.smoother_propagator->compute_transition_jacobian(
+            start_time_seconds,
+            filtered_state,
+            dt_seconds
+        );
+        if (jacobian.rows() != state_dim || jacobian.cols() != state_dim) {
+            continue;
+        }
+
+        mixed_jacobian += weight * jacobian;
+        weight_sum += weight;
+    }
+
+    if (!(weight_sum > 0.0)) {
+        return Eigen::MatrixXd::Identity(state_dim, state_dim);
+    }
+
+    return mixed_jacobian / weight_sum;
+}
+
 auto make_space_sensor_kinematics(
     const Eigen::Vector3d& initial_radial_direction,
     const Eigen::Vector3d& initial_velocity_direction,
@@ -1167,6 +1217,7 @@ auto build_model_specs(
         spec.description = description;
         spec.process_noise_sigma_accel = process_noise_sigma_accel;
         spec.include_in_imm = true;
+        spec.smoother_propagator = propagator;
         spec.factory =
             [
                 initial_estimate_6d,
@@ -1252,6 +1303,7 @@ auto build_model_specs(
             "Gravity and drag with a first-order smooth acceleration state tied to a generic boost equilibrium vector instead of a thrust profile.",
             4.0,
             false,
+            smooth_boost_propagator,
             [
                 smooth_boost_initial_estimate,
                 smooth_boost_initial_covariance,
@@ -1567,6 +1619,13 @@ auto run_imm_family(
         model_specs,
         true
     );
+    std::vector<ModelSpec> imm_model_specs;
+    imm_model_specs.reserve(model_specs.size());
+    for (const auto& spec : model_specs) {
+        if (spec.include_in_imm) {
+            imm_model_specs.push_back(spec);
+        }
+    }
 
     std::vector<std::unique_ptr<filtering::IKalmanFilter>> filters;
     filters.reserve(model_builds.size());
@@ -1577,6 +1636,12 @@ auto run_imm_family(
     }
 
     const int num_models = static_cast<int>(filters.size());
+    std::vector<estimation::SmootherEstimate> filtered_records;
+    filtered_records.reserve(trace.samples.size() + 1);
+    std::vector<Eigen::VectorXd> filtered_truth_states;
+    filtered_truth_states.reserve(trace.samples.size() + 1);
+    std::vector<estimation::PredictedEstimate> predicted_transitions;
+    predicted_transitions.reserve(trace.samples.size());
     result.initial_model_probabilities =
         Eigen::VectorXd::Constant(num_models, 1.0 / static_cast<double>(num_models));
     result.transition_matrix = Eigen::MatrixXd::Constant(
@@ -1611,6 +1676,12 @@ auto run_imm_family(
 
     append_combined_point(trace.initial_time_seconds, trace.initial_truth_state);
     result.combined_stats.add_sample(imm.get_state(), trace.initial_truth_state);
+    filtered_records.push_back({
+        trace.initial_time_seconds,
+        imm.get_state(),
+        imm.get_covariance()
+    });
+    filtered_truth_states.push_back(trace.initial_truth_state);
 
     const Eigen::VectorXd initial_mu = imm.get_model_probabilities();
     for (int i = 0; i < num_models; ++i) {
@@ -1652,14 +1723,39 @@ auto run_imm_family(
          step < static_cast<int>(trace.samples.size());
          ++step) {
         const auto& sample = trace.samples[static_cast<std::size_t>(step)];
-        const double dt = sample.time_seconds - imm.get_time();
+        const Eigen::VectorXd filtered_state_before_predict = imm.get_state();
+        const Eigen::VectorXd model_probabilities_before_predict =
+            imm.get_model_probabilities();
+        const double predict_start_time = imm.get_time();
+        const double dt = sample.time_seconds - predict_start_time;
+        const Eigen::MatrixXd mixed_transition_jacobian =
+            compute_mixed_transition_jacobian(
+                predict_start_time,
+                filtered_state_before_predict,
+                dt,
+                model_probabilities_before_predict,
+                imm_model_specs
+            );
         imm.predict(dt);
+        predicted_transitions.push_back({
+            predict_start_time,
+            sample.time_seconds,
+            imm.get_state(),
+            imm.get_covariance(),
+            mixed_transition_jacobian
+        });
         for (const auto& measurement : sample.measurements) {
             imm.update(measurement);
         }
 
         append_combined_point(sample.time_seconds, sample.truth_state);
         result.combined_stats.add_sample(imm.get_state(), sample.truth_state);
+        filtered_records.push_back({
+            sample.time_seconds,
+            imm.get_state(),
+            imm.get_covariance()
+        });
+        filtered_truth_states.push_back(sample.truth_state);
 
         const Eigen::VectorXd mu = imm.get_model_probabilities();
         for (int i = 0; i < num_models; ++i) {
@@ -1708,6 +1804,38 @@ auto run_imm_family(
         }
     }
 
+    const estimation::RTSSmoother smoother;
+    const std::vector<estimation::SmootherEstimate> smoothed_records = smoother.smooth(
+        filtered_records,
+        predicted_transitions
+    );
+    if (!smoothed_records.empty()) {
+        result.has_smoothed_combined = true;
+        for (std::size_t i = 0; i < smoothed_records.size(); ++i) {
+            const auto& record = smoothed_records[i];
+            const Eigen::VectorXd& truth_state = filtered_truth_states[i];
+
+            nlohmann::json point = make_state_point(record.time_seconds, record.state);
+            const int phase_index = phase_index_for_time(record.time_seconds, phase_windows);
+            point["phase"] = (phase_index >= 0)
+                                 ? phase_windows[static_cast<std::size_t>(phase_index)].name
+                                 : std::string("Unspecified");
+            point["smoother"] = "RTS";
+            append_error_fields(point, record.state, truth_state);
+            append_consistency_fields(
+                point,
+                record.state,
+                record.covariance,
+                truth_state
+            );
+            result.smoothed_combined_points.push_back(std::move(point));
+            result.smoothed_combined_stats.add_sample(
+                record.state,
+                truth_state
+            );
+        }
+    }
+
     result.final_model_probabilities = imm.get_model_probabilities();
     result.most_likely_model = imm.get_most_likely_model();
     result.ranking = rank_model_stats(result.model_stats);
@@ -1737,6 +1865,12 @@ auto run_imm_family(
     }
     std::cout << "  IMMCombined -> pos RMSE " << result.combined_stats.pos_rmse()
               << " m, vel RMSE " << result.combined_stats.vel_rmse() << " m/s\n";
+    if (result.has_smoothed_combined) {
+        std::cout << "  IMMCombinedRTS -> pos RMSE "
+                  << result.smoothed_combined_stats.pos_rmse()
+                  << " m, vel RMSE "
+                  << result.smoothed_combined_stats.vel_rmse() << " m/s\n";
+    }
 
     return result;
 }
@@ -1825,6 +1959,18 @@ auto run_summary_json(
             combined_summary.at("position_nees");
         run_json["performance"]["combined"]["phase_metrics"] =
             combined_summary.at("phase_metrics");
+        if (run.has_smoothed_combined) {
+            run_json["performance"]["smoothed_combined"] =
+                run.smoothed_combined_stats.to_json();
+            const nlohmann::json smoothed_summary =
+                summarize_trajectory_points(run.smoothed_combined_points, phase_windows);
+            run_json["performance"]["smoothed_combined"]["state_nees"] =
+                smoothed_summary.at("state_nees");
+            run_json["performance"]["smoothed_combined"]["position_nees"] =
+                smoothed_summary.at("position_nees");
+            run_json["performance"]["smoothed_combined"]["phase_metrics"] =
+                smoothed_summary.at("phase_metrics");
+        }
     } else {
         run_json["best_model_index"] = run.best_model_index;
         run_json["best_model_name"] =
@@ -2165,6 +2311,16 @@ int main(int argc, char* argv[]) {
                 {"filter_family", run.filter_family},
                 {"points", run.combined_points}
             });
+            if (run.has_smoothed_combined) {
+                trajectories.push_back({
+                    {"name", run.run_name + "-RTSCombined"},
+                    {"run_name", run.run_name},
+                    {"mode", run.mode},
+                    {"type", "imm_combined_smoothed"},
+                    {"filter_family", run.filter_family},
+                    {"points", run.smoothed_combined_points}
+                });
+            }
         }
 
         for (int i = 0; i < static_cast<int>(run.model_infos.size()); ++i) {
