@@ -57,6 +57,7 @@ gtest_discover_tests(filtering_tests)
 # Estimation tests
 add_executable(estimation_tests
     test_estimation_imm.cpp
+    test_estimation_rts_smoother.cpp
 )
 target_link_libraries(estimation_tests
     PRIVATE

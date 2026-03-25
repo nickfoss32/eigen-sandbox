@@ -4,6 +4,7 @@ find_package(Eigen3 REQUIRED)
 
 add_library(estimation
     imm.cpp
+    rts_smoother.cpp
 )
 add_library(tracking::estimation ALIAS estimation)
 target_include_directories(estimation PUBLIC ${CMAKE_SOURCE_DIR}/include)
